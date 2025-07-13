@@ -27,8 +27,6 @@ extern int _ebss;
 #define HEAP_BEGIN  ((void *)&_ebss)
 #define HEAP_END    (SRAM_END-__stack_size)
 
-
-
 void rt_hw_board_init(void);
 
 #endif /* __BOARD_H__ */

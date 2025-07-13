@@ -114,7 +114,9 @@
               <tool id="ilg.gnumcueclipse.managedbuild.cross.riscv.tool.c.compiler.1731377187" name="GNU RISC-V Cross C Compiler" superClass="ilg.gnumcueclipse.managedbuild.cross.riscv.tool.c.compiler">
                 <option id="ilg.gnumcueclipse.managedbuild.cross.riscv.option.c.compiler.nostdinc.1633344562" superClass="ilg.gnumcueclipse.managedbuild.cross.riscv.option.c.compiler.nostdinc" useByScannerDiscovery="true" value="false" valueType="boolean"/>
                 <option id="ilg.gnumcueclipse.managedbuild.cross.riscv.option.c.compiler.preprocessonly.208069239" superClass="ilg.gnumcueclipse.managedbuild.cross.riscv.option.c.compiler.preprocessonly" useByScannerDiscovery="false" value="false" valueType="boolean"/>
-                <option IS_BUILTIN_EMPTY="false" IS_VALUE_EMPTY="false" id="ilg.gnumcueclipse.managedbuild.cross.riscv.option.c.compiler.defs.177116515" name="Defined symbols (-D)" superClass="ilg.gnumcueclipse.managedbuild.cross.riscv.option.c.compiler.defs" useByScannerDiscovery="true" valueType="definedSymbols"/>
+                <option IS_BUILTIN_EMPTY="false" IS_VALUE_EMPTY="false" id="ilg.gnumcueclipse.managedbuild.cross.riscv.option.c.compiler.defs.177116515" name="Defined symbols (-D)" superClass="ilg.gnumcueclipse.managedbuild.cross.riscv.option.c.compiler.defs" useByScannerDiscovery="true" valueType="definedSymbols">
+                  <listOptionValue builtIn="false" value="__RTTHREAD__"/>
+                </option>
                 <option IS_BUILTIN_EMPTY="false" IS_VALUE_EMPTY="false" id="ilg.gnumcueclipse.managedbuild.cross.riscv.option.c.compiler.undef.1820512625" superClass="ilg.gnumcueclipse.managedbuild.cross.riscv.option.c.compiler.undef" useByScannerDiscovery="true" valueType="undefDefinedSymbols"/>
                 <option IS_BUILTIN_EMPTY="false" IS_VALUE_EMPTY="false" id="ilg.gnumcueclipse.managedbuild.cross.riscv.option.c.compiler.include.paths.1567947810" name="Include paths (-I)" superClass="ilg.gnumcueclipse.managedbuild.cross.riscv.option.c.compiler.include.paths" useByScannerDiscovery="true" valueType="includePath">
                   <listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/Debug}&quot;"/>
@@ -127,6 +129,12 @@
                   <listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/RtthreadNanoPatch}&quot;"/>
                   <listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/RtthreadNanoPatch/libcpu/risc-v}&quot;"/>
                   <listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/RtthreadNanoPatch/libcpu/risc-v/common}&quot;"/>
+                  <listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/CherryDAP/DAP/Include}&quot;"/>
+                  <listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/CherryDAP/CherryUSB/class/cdc}&quot;"/>
+                  <listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/CherryDAP/CherryUSB/common}&quot;"/>
+                  <listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/CherryDAP/CherryUSB/core}&quot;"/>
+                  <listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/CherryDAP/CherryUSB/port/ch32}&quot;"/>
+                  <listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/CherryDAP/CherryUSB/class/hid}&quot;"/>
                 </option>
                 <option IS_BUILTIN_EMPTY="false" IS_VALUE_EMPTY="false" id="ilg.gnumcueclipse.managedbuild.cross.riscv.option.c.compiler.include.systempaths.2011720354" superClass="ilg.gnumcueclipse.managedbuild.cross.riscv.option.c.compiler.include.systempaths" useByScannerDiscovery="true" valueType="includePath"/>
                 <option IS_BUILTIN_EMPTY="false" IS_VALUE_EMPTY="false" id="ilg.gnumcueclipse.managedbuild.cross.riscv.option.c.compiler.include.files.542153928" superClass="ilg.gnumcueclipse.managedbuild.cross.riscv.option.c.compiler.include.files" useByScannerDiscovery="true" valueType="includeFiles"/>
@@ -266,7 +274,7 @@
             </toolChain>
           </folderInfo>
           <sourceEntries>
-            <entry excluding="Startup/startup_ch32v30x_D8.S|RtthreadNano/rt-thread/libcpu|RtthreadNano/rt-thread/components/device|RtthreadNano/rt-thread/components/finsh|RtthreadNano/rt-thread/bsp" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name=""/>
+            <entry excluding="Startup/startup_ch32v30x_D8.S|RtthreadNano/rt-thread/libcpu|RtthreadNano/rt-thread/components/device|RtthreadNano/rt-thread/components/finsh|RtthreadNano/rt-thread/bsp|CherryDAP/projects|CherryDAP/CherryUSB/demo|CherryDAP/CherryUSB/third_party|CherryDAP/CherryUSB/port/fsdev|CherryDAP/CherryUSB/port/xhci|CherryDAP/CherryUSB/port/template|CherryDAP/CherryUSB/port/pusb2|CherryDAP/CherryUSB/port/ohci|CherryDAP/CherryUSB/port/nuvoton|CherryDAP/CherryUSB/port/musb|CherryDAP/CherryUSB/port/kinetis|CherryDAP/CherryUSB/port/hpm|CherryDAP/CherryUSB/port/ehci|CherryDAP/CherryUSB/port/dwc2|CherryDAP/CherryUSB/port/chipidea|CherryDAP/CherryUSB/port/bouffalolab|CherryDAP/CherryUSB/port/aic|CherryDAP/CherryUSB/platform|CherryDAP/CherryUSB/osal|CherryDAP/CherryUSB/port/ch32/usb_ch32_usbfs_reg.h|CherryDAP/CherryUSB/port/ch32/usb_ch58x_usbfs_reg.h|CherryDAP/CherryUSB/port/ch32/usb_ch58x_dc_usbfs.c|CherryDAP/CherryUSB/port/ch32/usb_dc_usbfs.c|CherryDAP/CherryUSB/core/usbh_core.c|CherryDAP/CherryUSB/core/usbh_core.h|CherryDAP/CherryUSB/class/wireless|CherryDAP/CherryUSB/class/video|CherryDAP/CherryUSB/class/vendor|CherryDAP/CherryUSB/class/template|CherryDAP/CherryUSB/class/msc|CherryDAP/CherryUSB/class/adb|CherryDAP/CherryUSB/class/audio|CherryDAP/CherryUSB/class/aoa|CherryDAP/CherryUSB/class/hub|CherryDAP/CherryUSB/class/hid|CherryDAP/CherryUSB/class/cdc/usbd_cdc_ecm.c|CherryDAP/CherryUSB/class/cdc/usbd_cdc_ecm.h|CherryDAP/CherryUSB/class/cdc/usbh_cdc_ecm.c|CherryDAP/CherryUSB/class/cdc/usbh_cdc_ecm.h|CherryDAP/CherryUSB/class/cdc/usbh_cdc_ncm.c|CherryDAP/CherryUSB/class/cdc/usbh_cdc_ncm.h|CherryDAP/CherryUSB/class/cdc/usbh_cdc_acm.c|CherryDAP/dap_main.h|CherryDAP/dap_main.c" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name=""/>
           </sourceEntries>
         </configuration>
       </storageModule>
