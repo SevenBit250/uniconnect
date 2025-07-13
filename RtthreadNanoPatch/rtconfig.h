@@ -107,8 +107,8 @@
 //  <i>Dynamic Heap Management
 //#define RT_USING_MEMPOOL
 //#define RT_USING_MEMHEAP
-#define RT_USING_SMALL_MEM
-#define RT_USING_HEAP
+// #define RT_USING_SMALL_MEM
+// #define RT_USING_HEAP
 
 
 // </c>
@@ -120,13 +120,13 @@
 
 /* Kernel Device Object */
 
-#define RT_USING_DEVICE
+// #define RT_USING_DEVICE
 #define RT_USING_CONSOLE
 #define RT_CONSOLEBUF_SIZE 128
 #define RT_CONSOLE_DEVICE_NAME  "uart1"
 
 
-#define RT_USING_FINSH
+// #define RT_USING_FINSH
 #if defined(RT_USING_FINSH)
     #define FINSH_USING_MSH
     #define FINSH_USING_MSH_DEFAULT
@@ -151,9 +151,9 @@
 
 // <<< end of configuration section >>>
 
-#define RT_USING_SERIAL
-#define RT_USING_PIN
-#define RT_USING_UART1
-#define RT_USING_DEVICE_IPC
+// #define RT_USING_SERIAL
+// #define RT_USING_PIN
+// #define RT_USING_UART1
+// #define RT_USING_DEVICE_IPC
 
 #endif

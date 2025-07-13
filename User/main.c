@@ -19,7 +19,7 @@
 */
 
 #include "debug.h"
-
+#include <rtthread.h>
 
 /* Global typedef */
 
@@ -37,18 +37,18 @@
  */
 int main(void)
 {
-	NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);
+	// NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);
 	SystemCoreClockUpdate();
-	Delay_Init();
-	USART_Printf_Init(115200);	
-	printf("SystemClk:%d\r\n",SystemCoreClock);
-	printf( "ChipID:%08x\r\n", DBGMCU_GetCHIPID() );
-	printf("This is printf example\r\n");
+	// Delay_Init();
+	// USART_Printf_Init(115200);	
+	rt_kprintf("SystemClk:%d\r\n",SystemCoreClock);
+	rt_kprintf( "ChipID:%08x\r\n", DBGMCU_GetCHIPID() );
+	rt_kprintf("This is printf example\r\n");
 
 	while(1)
     {
-		printf("This is printf example\r\n");
-		Delay_Ms(1000);
+		rt_kprintf("This is printf example\r\n");
+		rt_thread_mdelay(1000);
 	}
 }
 

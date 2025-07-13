@@ -42,7 +42,11 @@
 				"post_script": "",
 				"post_script_description": "",
 				"excludeResources": [
-					"${project}/Startup/startup_ch32v30x_D8.S"
+					"${project}/Startup/startup_ch32v30x_D8.S",
+					"${project}/RtthreadNano/rt-thread/libcpu",
+					"${project}/RtthreadNano/rt-thread/components/device",
+					"${project}/RtthreadNano/rt-thread/components/finsh",
+					"${project}/RtthreadNano/rt-thread/bsp"
 				],
 				"optimization": {
 					"level": "size",
