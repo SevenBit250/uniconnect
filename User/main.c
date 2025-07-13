@@ -17,7 +17,7 @@
  This example demonstrates using USART1(PA9) as a print debug port output.
 
 */
-
+#include "main.h"
 #include "debug.h"
 #include <rtthread.h>
 
@@ -38,17 +38,37 @@
 int main(void)
 {
 	// NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);
-	SystemCoreClockUpdate();
-	// Delay_Init();
-	// USART_Printf_Init(115200);	
+	SystemCoreClockUpdate();	
 	rt_kprintf("SystemClk:%d\r\n",SystemCoreClock);
 	rt_kprintf( "ChipID:%08x\r\n", DBGMCU_GetCHIPID() );
-	rt_kprintf("This is printf example\r\n");
-
-	while(1)
-    {
-		rt_kprintf("This is printf example\r\n");
+	while(1) {
 		rt_thread_mdelay(1000);
+		GPIO_WriteBit(SYS_STA_Port, SYS_STA_Pin, !GPIO_ReadOutputDataBit(SYS_STA_Port, SYS_STA_Pin));
 	}
 }
 
+static int device_init()
+{
+    GPIO_InitTypeDef GPIO_InitStructure = {0};
+    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA | RCC_APB2Periph_GPIOB | RCC_APB2Periph_GPIOC, ENABLE);
+    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_Out_PP;
+    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+    GPIO_InitStructure.GPIO_Pin = SWD_STA_Pin;
+	GPIO_SetBits(SWD_STA_Port, SWD_STA_Pin);
+    GPIO_Init(SWD_STA_Port, &GPIO_InitStructure);
+    GPIO_InitStructure.GPIO_Pin = SYS_STA_Pin;
+	GPIO_SetBits(SYS_STA_Port, SYS_STA_Pin);
+    GPIO_Init(SYS_STA_Port, &GPIO_InitStructure);
+    GPIO_InitStructure.GPIO_Pin = COM_STA_Pin;
+	GPIO_SetBits(COM_STA_Port, COM_STA_Pin);
+    GPIO_Init(COM_STA_Port, &GPIO_InitStructure);
+    GPIO_InitStructure.GPIO_Pin = CAN1_STA_Pin;
+	GPIO_SetBits(CAN1_STA_Port, CAN1_STA_Pin);
+    GPIO_Init(CAN1_STA_Port, &GPIO_InitStructure);
+    GPIO_InitStructure.GPIO_Pin = CAN2_STA_Pin;
+	GPIO_SetBits(CAN2_STA_Port, CAN2_STA_Pin);
+    GPIO_Init(CAN2_STA_Port, &GPIO_InitStructure);
+    return 0;
+}
+
+INIT_BOARD_EXPORT(device_init);

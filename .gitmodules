@@ -1,3 +1,6 @@
 [submodule "RtthreadNano"]
 	path = RtthreadNano
 	url = https://github.com/RT-Thread/rtthread-nano.git
+[submodule "CherryUSB"]
+	path = CherryUSB
+	url = https://github.com/cherry-embedded/CherryUSB.git
