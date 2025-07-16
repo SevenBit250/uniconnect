@@ -100,7 +100,9 @@
 					"${project}/CherryDAP/CherryUSB/class/cdc/usbh_cdc_ncm.h",
 					"${project}/CherryDAP/CherryUSB/class/cdc/usbh_cdc_acm.c",
 					"${project}/CherryDAP/CherryUSB/class/midi",
-					"${project}/CherryDAP/CherryUSB/class/dfu"
+					"${project}/CherryDAP/CherryUSB/class/dfu",
+					"${project}/CherryUSB/platform/daplink/dap_main.h",
+					"${project}/CherryUSB/platform/daplink/dap_main.c"
 				],
 				"optimization": {
 					"level": "size",
@@ -193,7 +195,15 @@
 							"${project}/RtthreadNano/rt-thread/src",
 							"${project}/RtthreadNanoPatch",
 							"${project}/RtthreadNanoPatch/libcpu/risc-v",
-							"${project}/RtthreadNanoPatch/libcpu/risc-v/common"
+							"${project}/RtthreadNanoPatch/libcpu/risc-v/common",
+							"${project}/CherryUSB",
+							"${project}/CherryUSB/class/cdc",
+							"${project}/CherryUSB/class/dfu",
+							"${project}/CherryUSB/class/hid",
+							"${project}/CherryUSB/class/msc",
+							"${project}/CherryUSB/common",
+							"${project}/CherryUSB/core",
+							"${project}/CherryUSB/port/ch32/ch32hs"
 						],
 						"include_system_paths": [],
 						"include_files": []
