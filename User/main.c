@@ -38,7 +38,7 @@
 int main(void)
 {
 	// NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);
-	SystemCoreClockUpdate();	
+	// SystemCoreClockUpdate();	
 	rt_kprintf("SystemClk:%d\r\n",SystemCoreClock);
 	rt_kprintf( "ChipID:%08x\r\n", DBGMCU_GetCHIPID() );
 	while(1) {
@@ -47,7 +47,18 @@ int main(void)
 	}
 }
 
-static int device_init()
+void usb_dc_low_level_init(void)
+{
+    RCC_USBCLK48MConfig( RCC_USBCLK48MCLKSource_USBPHY );
+    RCC_USBHSPLLCLKConfig( RCC_HSBHSPLLCLKSource_HSE );
+    RCC_USBHSConfig( RCC_USBPLL_Div2 );
+    RCC_USBHSPLLCKREFCLKConfig( RCC_USBHSPLLCKREFCLK_4M );
+    RCC_USBHSPHYPLLALIVEcmd( ENABLE );
+    RCC_AHBPeriphClockCmd( RCC_AHBPeriph_USBHS, ENABLE );
+    NVIC_EnableIRQ( USBHS_IRQn );
+}
+
+BOARD_INIT(device_init)
 {
     GPIO_InitTypeDef GPIO_InitStructure = {0};
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA | RCC_APB2Periph_GPIOB | RCC_APB2Periph_GPIOC, ENABLE);
@@ -71,4 +82,3 @@ static int device_init()
     return 0;
 }
 
-INIT_BOARD_EXPORT(device_init);

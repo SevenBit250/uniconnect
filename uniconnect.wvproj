@@ -20,6 +20,16 @@
 				"parentLogicPath": "",
 				"type": "file",
 				"name": "*.wvproj"
+			},
+			{
+				"parentLogicPath": "User",
+				"type": "file",
+				"name": "DAP_config.h"
+			},
+			{
+				"parentLogicPath": "User",
+				"type": "file",
+				"name": "usb_config.h"
 			}
 		],
 		"projectName": "uniconnect",
@@ -89,8 +99,8 @@
 					"${project}/CherryDAP/CherryUSB/class/cdc/usbh_cdc_ncm.c",
 					"${project}/CherryDAP/CherryUSB/class/cdc/usbh_cdc_ncm.h",
 					"${project}/CherryDAP/CherryUSB/class/cdc/usbh_cdc_acm.c",
-					"${project}/CherryDAP/dap_main.h",
-					"${project}/CherryDAP/dap_main.c"
+					"${project}/CherryDAP/CherryUSB/class/midi",
+					"${project}/CherryDAP/CherryUSB/class/dfu"
 				],
 				"optimization": {
 					"level": "size",
@@ -183,13 +193,7 @@
 							"${project}/RtthreadNano/rt-thread/src",
 							"${project}/RtthreadNanoPatch",
 							"${project}/RtthreadNanoPatch/libcpu/risc-v",
-							"${project}/RtthreadNanoPatch/libcpu/risc-v/common",
-							"${project}/CherryDAP/DAP/Include",
-							"${project}/CherryDAP/CherryUSB/class/cdc",
-							"${project}/CherryDAP/CherryUSB/common",
-							"${project}/CherryDAP/CherryUSB/core",
-							"${project}/CherryDAP/CherryUSB/port/ch32",
-							"${project}/CherryDAP/CherryUSB/class/hid"
+							"${project}/RtthreadNanoPatch/libcpu/risc-v/common"
 						],
 						"include_system_paths": [],
 						"include_files": []

@@ -19,6 +19,11 @@
 #define CAN2_STA_Port GPIOA
 #define CAN2_STA_Pin GPIO_Pin_3
 
+/* shortcut marco */
+#define BOARD_INIT(name)    static int name();       \
+                            INIT_BOARD_EXPORT(name); \
+                            static int name()
+
 #ifdef __cplusplus
  }
 #endif

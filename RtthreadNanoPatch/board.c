@@ -54,6 +54,7 @@ RT_WEAK void *rt_heap_end_get(void)
 void rt_hw_board_init()
 {
     /* System Tick Configuration */
+    SystemCoreClockUpdate();
     _SysTick_Config(SystemCoreClock / RT_TICK_PER_SECOND);
     /* uart init */
     uart_init();
