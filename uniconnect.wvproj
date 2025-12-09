@@ -9,6 +9,7 @@
 			"rtos": "NoneOS",
 			"mcu": "CH32V305CCT6",
 			"description": "Website: http://www.wch.cn/products/CH32V307.html?\\nROM(byte): 256K, SRAM(byte): 64K, CHIP PINS: 48, GPIO PORTS: 41.\\nWCH CH32V3 series of mainstream MCUs covers the needs of a large variety of applications in the industrial,medical and consumer markets. High performance with first-class peripherals and low-power,low-voltage operation is paired with a high level of integration at accessible prices with a simple architecture and easy-to-use tools.",
+			"artifactType": "executable",
 			"link": "WCH-Link",
 			"peripheral_version": "2.8",
 			"calibrateSupport": false,
@@ -203,7 +204,10 @@
 							"${project}/CherryUSB/class/msc",
 							"${project}/CherryUSB/common",
 							"${project}/CherryUSB/core",
-							"${project}/CherryUSB/port/ch32/ch32hs"
+							"${project}/CherryUSB/port/ch32/ch32hs",
+							"${project}/UsbClass",
+							"${project}/Usb2Device",
+							"${project}/CherryRB"
 						],
 						"include_system_paths": [],
 						"include_files": []
@@ -368,6 +372,7 @@
 					"show_totals": false,
 					"other_flags": ""
 				},
+				"configVariables": [],
 				"riscvTargetProcessor": {
 					"architecture": "rv32i",
 					"multiply_extension": true,
@@ -387,8 +392,7 @@
 					"other_target_flags": ""
 				},
 				"component_toolchain": "${WCH:Toolchain:GCC8}",
-				"name": "obj",
-				"configVariables": []
+				"name": "obj"
 			}
 		]
 	},

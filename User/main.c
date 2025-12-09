@@ -20,6 +20,7 @@
 #include "main.h"
 #include "debug.h"
 #include <rtthread.h>
+#include "usb_class_configuration.h"
 
 /* Global typedef */
 
@@ -39,23 +40,25 @@ int main(void)
 {
 	// NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);
 	// SystemCoreClockUpdate();	
-	rt_kprintf("SystemClk:%d\r\n",SystemCoreClock);
-	rt_kprintf( "ChipID:%08x\r\n", DBGMCU_GetCHIPID() );
+	rt_kprintf("SystemClk:%d\r",SystemCoreClock);
+	rt_kprintf("ChipID:%08x\r", DBGMCU_GetCHIPID());
+    cdc_acm_init(0, 0);
 	while(1) {
-		rt_thread_mdelay(1000);
-		GPIO_WriteBit(SYS_STA_Port, SYS_STA_Pin, !GPIO_ReadOutputDataBit(SYS_STA_Port, SYS_STA_Pin));
+		// rt_thread_mdelay(1000);
+		// GPIO_WriteBit(SYS_STA_Port, SYS_STA_Pin, !GPIO_ReadOutputDataBit(SYS_STA_Port, SYS_STA_Pin));
+        cdc_acm_data_send_with_dtr_test(0);
 	}
 }
 
 void usb_dc_low_level_init(void)
 {
-    RCC_USBCLK48MConfig( RCC_USBCLK48MCLKSource_USBPHY );
-    RCC_USBHSPLLCLKConfig( RCC_HSBHSPLLCLKSource_HSE );
-    RCC_USBHSConfig( RCC_USBPLL_Div2 );
-    RCC_USBHSPLLCKREFCLKConfig( RCC_USBHSPLLCKREFCLK_4M );
-    RCC_USBHSPHYPLLALIVEcmd( ENABLE );
-    RCC_AHBPeriphClockCmd( RCC_AHBPeriph_USBHS, ENABLE );
-    NVIC_EnableIRQ( USBHS_IRQn );
+    RCC_USBCLK48MConfig(RCC_USBCLK48MCLKSource_USBPHY);
+    RCC_USBHSPLLCLKConfig(RCC_HSBHSPLLCLKSource_HSE);
+    RCC_USBHSConfig(RCC_USBPLL_Div2);
+    RCC_USBHSPLLCKREFCLKConfig( RCC_USBHSPLLCKREFCLK_4M);
+    RCC_USBHSPHYPLLALIVEcmd(ENABLE);
+    RCC_AHBPeriphClockCmd(RCC_AHBPeriph_USBHS, ENABLE);
+    NVIC_EnableIRQ(USBHS_IRQn);
 }
 
 BOARD_INIT(device_init)
@@ -79,6 +82,8 @@ BOARD_INIT(device_init)
     GPIO_InitStructure.GPIO_Pin = CAN2_STA_Pin;
 	GPIO_SetBits(CAN2_STA_Port, CAN2_STA_Pin);
     GPIO_Init(CAN2_STA_Port, &GPIO_InitStructure);
+
+    usb_dc_low_level_init();
     return 0;
 }
 
