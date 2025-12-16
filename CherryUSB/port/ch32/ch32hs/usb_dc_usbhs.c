@@ -3,6 +3,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
+#include "rtthread.h"
 #include "usbd_core.h"
 #include "usb_ch32_usbhs_reg.h"
 
@@ -424,5 +425,7 @@ void USBHS_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 void USBHS_IRQHandler(void)
 {
     extern void USBD_IRQHandler(uint8_t busid);
+    rt_interrupt_enter();
     USBD_IRQHandler(0);
+    rt_interrupt_leave();
 }

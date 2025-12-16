@@ -20,7 +20,7 @@
 #include "main.h"
 #include "debug.h"
 #include <rtthread.h>
-#include "usb_class_configuration.h"
+#include "usb_device_class.h"
 
 /* Global typedef */
 
@@ -38,15 +38,14 @@
  */
 int main(void)
 {
-	// NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);
-	// SystemCoreClockUpdate();	
-	rt_kprintf("SystemClk:%d\r",SystemCoreClock);
-	rt_kprintf("ChipID:%08x\r", DBGMCU_GetCHIPID());
+	// rt_kprintf("SystemClk:%d\r",SystemCoreClock);
+	// rt_kprintf("ChipID:%08x\r", DBGMCU_GetCHIPID());
     cdc_acm_init(0, 0);
 	while(1) {
-		// rt_thread_mdelay(1000);
-		// GPIO_WriteBit(SYS_STA_Port, SYS_STA_Pin, !GPIO_ReadOutputDataBit(SYS_STA_Port, SYS_STA_Pin));
-        cdc_acm_data_send_with_dtr_test(0);
+        cdc_acm_handle();
+		// rt_thread_mdelay(100);
+		GPIO_WriteBit(SYS_STA_Port, SYS_STA_Pin, !GPIO_ReadOutputDataBit(SYS_STA_Port, SYS_STA_Pin));
+        
 	}
 }
 

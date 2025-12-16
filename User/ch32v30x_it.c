@@ -24,11 +24,7 @@ void HardFault_Handler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
  */
 void NMI_Handler(void)
 {
-    GET_INT_SP();
-    rt_interrupt_enter();
     rt_kprintf(" NMI Handler\r\n");
-    rt_interrupt_leave();
-    FREE_INT_SP();
 }
 
 /*********************************************************************
@@ -40,11 +36,9 @@ void NMI_Handler(void)
  */
 void HardFault_Handler(void)
 {
-    GET_INT_SP();
-    rt_interrupt_enter();
-    rt_kprintf(" hardfult\r\n");
-    rt_interrupt_leave();
-    FREE_INT_SP();
+    rt_kprintf(" HardFault Handler\r\n");
+    NVIC_SystemReset();
+    while (1);
 }
 
 

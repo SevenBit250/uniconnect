@@ -14,8 +14,8 @@
 
 #include "debug.h"
 
-#define GET_INT_SP()   asm("csrrw sp,mscratch,sp")
-#define FREE_INT_SP()  asm("csrrw sp,mscratch,sp")
+// #define GET_INT_SP()   asm("csrrw sp,mscratch,sp")
+// #define FREE_INT_SP()  asm("csrrw sp,mscratch,sp")
 
 #endif /* __CH32V30x_IT_H */
 

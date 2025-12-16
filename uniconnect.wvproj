@@ -106,7 +106,7 @@
 					"${project}/CherryUSB/platform/daplink/dap_main.c"
 				],
 				"optimization": {
-					"level": "size",
+					"level": "none",
 					"message_length": true,
 					"char_is_signed": true,
 					"function_sections": true,
