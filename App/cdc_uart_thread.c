@@ -1,7 +1,7 @@
 #include "usbd_core.h"
 #include "usbd_cdc_acm.h"
 #include "usb_class.h"
-#include "usb2device.h"
+#include "bsp_uart.h"
 #include "rtthread.h"
 #include "completion.h"
 #include "chry_ringbuffer.h"
@@ -146,7 +146,7 @@ void cdc_rx_thread_entry(void *param)
 
         if (chry_ringbuffer_get_used(&cdc_handle.rb)) {
             buffer = chry_ringbuffer_linear_read_setup(&cdc_handle.rb, &size);
-            uart_write_to_dev(buffer, size);
+            bsp_uart_write_by_dma(buffer, size);
             chry_ringbuffer_linear_read_done(&cdc_handle.rb, size);
         }
 
@@ -166,7 +166,7 @@ void cdc_ctrl_thread_entry(void *param)
     while (1) {
         rt_sem_take(&cdc_handle.lincoding_sem, RT_WAITING_FOREVER);
         // 更新串口配置
-        uart_config_override (
+        bsp_uart_config (
             cdc_handle.lincoding.dwDTERate, 
             cdc_handle.lincoding.bCharFormat, 
             cdc_handle.lincoding.bParityType);

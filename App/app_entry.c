@@ -1,3 +1,4 @@
+#include "main.h"
 #include "ch32v30x.h"
 #include <rtthread.h>
 
@@ -16,7 +17,7 @@ static int app_entry(void)
                    RT_NULL,
                    &swd_thread_stack[0],
                    sizeof(swd_thread_stack),
-                   0, 
+                   20, 
                    rt_tick_from_millisecond(1));
     rt_thread_startup(&swd_thread);
 
@@ -29,5 +30,6 @@ static void swd_thread_entry(void *param)
 {
     while (1) {
         rt_thread_mdelay(1000);
+        // GPIO_WriteBit(SYS_STA_Port, SYS_STA_Pin, !GPIO_ReadOutputDataBit(SYS_STA_Port, SYS_STA_Pin));
     }
 }

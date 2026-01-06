@@ -207,7 +207,9 @@
 							"${project}/CherryUSB/port/ch32/ch32hs",
 							"${project}/UsbClass",
 							"${project}/Usb2Device",
-							"${project}/CherryRB"
+							"${project}/CherryRB",
+							"${project}/Bsp/inc",
+							"${project}/Bsp"
 						],
 						"include_system_paths": [],
 						"include_files": []
