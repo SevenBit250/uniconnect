@@ -1,6 +1,7 @@
 #include "usbd_core.h"
 #include "usbd_cdc_acm.h"
 #include "usb_class.h"
+#include "main.h"
 
 static const uint8_t device_descriptor[] = {
     USB_DEVICE_DESCRIPTOR_INIT (USB_2_0, 0xEF, 0x02, 0x01, USBD_VID, USBD_PID, 0x0100, 0x01)
@@ -58,6 +59,15 @@ const struct usb_descriptor usb_descriptor = {
 };
 
 static void usbd_event_handler (uint8_t busid, uint8_t event) {
+    switch (event) {
+        case USBD_EVENT_RESET:
+            break;
+        case USBD_EVENT_CONFIGURED:
+            updateSystemStatus(SYS_STA_USB_CONNECTED);
+            break;
+        default:
+            break;
+    }
     cdc_uart_event_handler(busid, event);
 }
 

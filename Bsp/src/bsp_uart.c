@@ -42,12 +42,32 @@ void bsp_uart_config(uint32_t baudrate, uint8_t stopbits, uint8_t parity)
 
 void bsp_uart_write(const uint8_t *data, uint32_t size)
 {
-
+    for (uint32_t i = 0; i < size; i++) {
+        while(USART_GetFlagStatus(USART1, USART_FLAG_TC) == RESET);
+        USART_SendData(USART1, *(data + i));
+    }
 }
 
 void bsp_uart_write_by_dma(const uint8_t *data, uint32_t size)
 {
-    
+    DMA_InitTypeDef DMA_InitStructure = {0};
+    DMA_DeInit (DMA1_Channel4);
+    DMA_InitStructure.DMA_PeripheralInc                  = DMA_PeripheralInc_Disable;
+    DMA_InitStructure.DMA_MemoryInc                      = DMA_MemoryInc_Enable;
+    DMA_InitStructure.DMA_PeripheralDataSize             = DMA_PeripheralDataSize_Byte;
+    DMA_InitStructure.DMA_MemoryDataSize                 = DMA_MemoryDataSize_Byte;
+    DMA_InitStructure.DMA_Mode                           = DMA_Mode_Normal;
+    DMA_InitStructure.DMA_Priority                       = DMA_Priority_VeryHigh;
+    DMA_InitStructure.DMA_M2M                            = DMA_M2M_Disable;
+    DMA_InitStructure.DMA_PeripheralBaseAddr             = (uint32_t)(&USART1->DATAR);
+    DMA_InitStructure.DMA_MemoryBaseAddr                 = (uint32_t)data;
+    DMA_InitStructure.DMA_DIR                            = DMA_DIR_PeripheralDST;
+    DMA_InitStructure.DMA_BufferSize                     = size;
+    DMA_Init (DMA1_Channel4, &DMA_InitStructure);
+    DMA_ITConfig(DMA1_Channel4, DMA_IT_TC, ENABLE);
+    DMA_Cmd (DMA1_Channel4, ENABLE);
+    // 等待dma发送完成
+    rt_sem_take(&uart_handle.tx_complte_sem, RT_WAITING_FOREVER);
 }
 
 static int bsp_uart_init(void)
@@ -80,6 +100,20 @@ static int bsp_uart_init(void)
     NVIC_Init (&NVIC_InitStructure);
     USART_Cmd (USART1, ENABLE);
 
+    // rx dma nvic
+    NVIC_InitStructure.NVIC_IRQChannel                   = DMA1_Channel5_IRQn;
+    NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 1;
+    NVIC_InitStructure.NVIC_IRQChannelSubPriority        = 1;
+    NVIC_InitStructure.NVIC_IRQChannelCmd                = ENABLE;
+    NVIC_Init (&NVIC_InitStructure);
+
+    // tx dma nvic
+    NVIC_InitStructure.NVIC_IRQChannel                   = DMA1_Channel4_IRQn;
+    NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 1;
+    NVIC_InitStructure.NVIC_IRQChannelSubPriority        = 1;
+    NVIC_InitStructure.NVIC_IRQChannelCmd                = ENABLE;
+    NVIC_Init (&NVIC_InitStructure);
+
     // rx dma init
     DMA_DeInit (DMA1_Channel5);
     DMA_InitStructure.DMA_PeripheralInc                  = DMA_PeripheralInc_Disable;
@@ -93,21 +127,32 @@ static int bsp_uart_init(void)
     DMA_InitStructure.DMA_MemoryBaseAddr                 = (uint32_t)uart_handle.dma_buffer;
     DMA_InitStructure.DMA_DIR                            = DMA_DIR_PeripheralSRC;
     DMA_InitStructure.DMA_BufferSize                     = sizeof (uart_handle.dma_buffer);
-    NVIC_InitStructure.NVIC_IRQChannel                   = DMA1_Channel5_IRQn;
-    NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 1;
-    NVIC_InitStructure.NVIC_IRQChannelSubPriority        = 1;
-    NVIC_InitStructure.NVIC_IRQChannelCmd                = ENABLE;
     DMA_Init (DMA1_Channel5, &DMA_InitStructure);
     DMA_ITConfig (DMA1_Channel5, DMA_IT_TC, ENABLE);
-    NVIC_Init (&NVIC_InitStructure);
-    DMA_Cmd (DMA1_Channel5, ENABLE);
-    USART_DMACmd (USART1, USART_DMAReq_Rx, ENABLE);
 
-    // tx dma init
+    DMA_Cmd (DMA1_Channel5, ENABLE);
+    USART_DMACmd (USART1, USART_DMAReq_Rx | USART_DMAReq_Tx, ENABLE);
+
     return 0;
 }
 INIT_BOARD_EXPORT(bsp_uart_init);
 
+static int bsp_uart_env_init(void)
+{
+    rt_sem_init(&uart_handle.data_ready_sem, "uart_rx", 0, RT_IPC_FLAG_FIFO);
+    rt_sem_init(&uart_handle.tx_complte_sem, "uart_tx", 0, RT_IPC_FLAG_FIFO);
+    chry_ringbuffer_init(&uart_handle.rb, uart_handle.rb_buffer, sizeof(uart_handle.rb_buffer));
+    return 0;
+}
+INIT_ENV_EXPORT(bsp_uart_env_init);
+
+void DMA1_Channel4_IRQHandler (void) __attribute__ ((interrupt ("WCH-Interrupt-fast")));
+void DMA1_Channel4_IRQHandler (void) {
+    rt_interrupt_enter();
+    rt_sem_release (&uart_handle.tx_complte_sem);
+    DMA_ClearITPendingBit (DMA1_IT_TC4);
+    rt_interrupt_leave();
+}
 
 void DMA1_Channel5_IRQHandler (void) __attribute__ ((interrupt ("WCH-Interrupt-fast")));
 void DMA1_Channel5_IRQHandler (void) {

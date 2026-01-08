@@ -1,7 +1,7 @@
 #include "usbd_core.h"
 #include "usbd_cdc_acm.h"
 #include "usb_class.h"
-#include "bsp_uart.h"
+#include "bsp.h"
 #include "rtthread.h"
 #include "completion.h"
 #include "chry_ringbuffer.h"
@@ -12,7 +12,7 @@
 
 #define CDC_CTRL_THREAD_STACK_SIZE 256u
 
-static uart_buffer_t uart_handle;
+extern uart_buffer_t uart_handle;
 
 static usb_cdc_buffer_t cdc_handle;
 
@@ -35,23 +35,9 @@ void cdc_uart_event_handler(uint8_t busid, uint8_t event)
         case USBD_EVENT_RESET:
             cdc_handle.allow_transfer = RT_FALSE;
             break;
-        case USBD_EVENT_CONNECTED:
-            break;
-        case USBD_EVENT_DISCONNECTED:
-            break;
-        case USBD_EVENT_RESUME:
-            break;
-        case USBD_EVENT_SUSPEND:
-            break;
         case USBD_EVENT_CONFIGURED:
-            /* setup first out ep read transfer */
             usbd_ep_start_read(0, CDC_OUT_EP, cdc_handle.cdc_buffer, sizeof(cdc_handle.cdc_buffer));
             break;
-        case USBD_EVENT_SET_REMOTE_WAKEUP:
-            break;
-        case USBD_EVENT_CLR_REMOTE_WAKEUP:
-            break;
-
         default:
             break;
     }
@@ -177,6 +163,13 @@ void cdc_ctrl_thread_entry(void *param)
         chry_ringbuffer_reset(&uart_handle.rb);
         // 允许传输
         cdc_handle.allow_transfer = true;
+        // 亮起uart指示灯
+        for(uint8_t i = 0; i < 2; i++) {
+            bsp_led_ctrl(BSP_LED_ID_COM_STA, 1);
+            rt_thread_mdelay(50);
+            bsp_led_ctrl(BSP_LED_ID_COM_STA, 0);
+            rt_thread_mdelay(50);
+        }
     }
 }
 
@@ -190,14 +183,10 @@ int cdc_uart_env_init(void)
 {
     rt_sem_init(&cdc_handle.lincoding_sem,   "cdc_lsem", 0, RT_IPC_FLAG_FIFO);
     rt_sem_init(&cdc_handle.data_ready_sem,  "cdc_rsem", 0, RT_IPC_FLAG_FIFO);
-    rt_sem_init(&uart_handle.data_ready_sem, "cdc_tsem", 0, RT_IPC_FLAG_FIFO);
-
     chry_ringbuffer_init(&cdc_handle.rb,  cdc_handle.rb_buffer,  sizeof(cdc_handle.rb_buffer));
-    chry_ringbuffer_init(&uart_handle.rb, uart_handle.rb_buffer, sizeof(uart_handle.rb_buffer));
-
     return 0;
 }
-INIT_BOARD_EXPORT(cdc_uart_env_init);
+INIT_ENV_EXPORT(cdc_uart_env_init);
 
 int cdc_uart_thread_init(void)
 {
@@ -233,6 +222,8 @@ int cdc_uart_thread_init(void)
     rt_thread_startup(&cdc_rx_thread);
 
     rt_thread_startup(&cdc_ctrl_thread);
+
+    usb_init(0, 0);
 
     return 0;
 }

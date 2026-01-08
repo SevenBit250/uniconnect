@@ -1,21 +1,17 @@
 #include "bsp.h"
-#include "ch32v30x.h"
+#include "main.h"
 #include <rtthread.h>
 
-enum sys_status{
-    SYS_STA_USB_NOT_CONNECTED,
-    SYS_STA_USB_CONNECTED,
-};
-
-static enum sys_status status = SYS_STA_USB_NOT_CONNECTED;
 static struct rt_thread monitor_thread;
 ALIGN(RT_ALIGN_SIZE) static char monitor_thread_stack[1024];
 
 
 static void monitor_thread_entry(void *param)
 {
+    static system_status_t last_state;
     while (1) {
-        switch (status) {
+        system_status_t state = getSystemStatus();
+        switch (state) {
             case SYS_STA_USB_NOT_CONNECTED:
                 for (uint8_t i = 0b10000, ii = 0b00001; i > 0; i >>= 1, ii <<= 1) {
                     bsp_led_ctrl_bit(i | ii);
@@ -24,13 +20,19 @@ static void monitor_thread_entry(void *param)
             break;
 
             case SYS_STA_USB_CONNECTED:
+                if (last_state != state && last_state == SYS_STA_USB_NOT_CONNECTED) {
+                    bsp_led_ctrl_bit(0b00000);
+                }
                 bsp_led_ctrl(BSP_LED_ID_SYS_STA, 1);
-                rt_thread_mdelay(100);
+                rt_thread_mdelay(1000);
+                bsp_led_ctrl(BSP_LED_ID_SYS_STA, 0);
+                rt_thread_mdelay(1000);
             break;
 
             default:
             break;
         }
+        last_state = state;
     }
 }
 
