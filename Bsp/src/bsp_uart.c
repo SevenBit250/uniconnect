@@ -4,6 +4,8 @@
 
 uart_buffer_t uart_handle;
 
+static uint16_t uart_tx_dma_size = 0;
+
 static inline void bsp_uart_config_private (USART_TypeDef *uart, uint32_t baudrate, uint8_t stopbits, uint8_t parity) {
     USART_InitTypeDef USART_InitStructure = {0};
 
@@ -48,9 +50,10 @@ void bsp_uart_write(const uint8_t *data, uint32_t size)
     }
 }
 
-void bsp_uart_write_by_dma(const uint8_t *data, uint32_t size)
+void bsp_uart_write_by_dma(const uint8_t *data, uint16_t size)
 {
     DMA_InitTypeDef DMA_InitStructure = {0};
+    uart_tx_dma_size = size;
     DMA_DeInit (DMA1_Channel4);
     DMA_InitStructure.DMA_PeripheralInc                  = DMA_PeripheralInc_Disable;
     DMA_InitStructure.DMA_MemoryInc                      = DMA_MemoryInc_Enable;
@@ -66,6 +69,10 @@ void bsp_uart_write_by_dma(const uint8_t *data, uint32_t size)
     DMA_Init (DMA1_Channel4, &DMA_InitStructure);
     DMA_ITConfig(DMA1_Channel4, DMA_IT_TC, ENABLE);
     DMA_Cmd (DMA1_Channel4, ENABLE);
+}
+
+void bsp_uart_wait_tx_dma_complted() 
+{
     // 等待dma发送完成
     rt_sem_take(&uart_handle.tx_complte_sem, RT_WAITING_FOREVER);
 }
@@ -79,7 +86,7 @@ static int bsp_uart_init(void)
     // clock init
     RCC_AHBPeriphClockCmd (RCC_AHBPeriph_DMA1, ENABLE);
     RCC_APB2PeriphClockCmd (RCC_APB2Periph_GPIOA, ENABLE);
-    RCC_APB1PeriphClockCmd (RCC_APB2Periph_USART1, ENABLE);
+    RCC_APB2PeriphClockCmd (RCC_APB2Periph_USART1, ENABLE);
 
     // gpio init
     GPIO_InitStructure.GPIO_Pin                          = GPIO_Pin_9;
@@ -129,7 +136,6 @@ static int bsp_uart_init(void)
     DMA_InitStructure.DMA_BufferSize                     = sizeof (uart_handle.dma_buffer);
     DMA_Init (DMA1_Channel5, &DMA_InitStructure);
     DMA_ITConfig (DMA1_Channel5, DMA_IT_TC, ENABLE);
-
     DMA_Cmd (DMA1_Channel5, ENABLE);
     USART_DMACmd (USART1, USART_DMAReq_Rx | USART_DMAReq_Tx, ENABLE);
 
@@ -149,8 +155,10 @@ INIT_ENV_EXPORT(bsp_uart_env_init);
 void DMA1_Channel4_IRQHandler (void) __attribute__ ((interrupt ("WCH-Interrupt-fast")));
 void DMA1_Channel4_IRQHandler (void) {
     rt_interrupt_enter();
-    rt_sem_release (&uart_handle.tx_complte_sem);
     DMA_ClearITPendingBit (DMA1_IT_TC4);
+    if (uart_handle.dma_tx_complate_callback) {
+        uart_handle.dma_tx_complate_callback(uart_tx_dma_size);
+    }
     rt_interrupt_leave();
 }
 

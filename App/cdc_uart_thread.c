@@ -10,7 +10,9 @@
 
 #define CDC_RX_THREAD_STACK_SIZE   1024u
 
-#define CDC_CTRL_THREAD_STACK_SIZE 256u
+#define CDC_CTRL_THREAD_STACK_SIZE 1024u
+
+#define CDC_STA_LED_THREAD_STACK_SIZE 256u
 
 extern uart_buffer_t uart_handle;
 
@@ -19,10 +21,12 @@ static usb_cdc_buffer_t cdc_handle;
 static struct rt_thread cdc_tx_thread;
 static struct rt_thread cdc_rx_thread;
 static struct rt_thread cdc_ctrl_thread;
+static struct rt_thread cdc_sta_led_thread;
 
 ALIGN(RT_ALIGN_SIZE) static char cdc_tx_stack[CDC_TX_THREAD_STACK_SIZE];
 ALIGN(RT_ALIGN_SIZE) static char cdc_rx_stack[CDC_RX_THREAD_STACK_SIZE];
 ALIGN(RT_ALIGN_SIZE) static char cdc_ctrl_stack[CDC_CTRL_THREAD_STACK_SIZE];
+ALIGN(RT_ALIGN_SIZE) static char cdc_sta_led_stack[CDC_STA_LED_THREAD_STACK_SIZE];
 
 /***************************************************************************/
 /*                                                                         */
@@ -92,6 +96,24 @@ void usbd_cdc_acm_get_line_coding (uint8_t busid, uint8_t intf, struct cdc_line_
 
 /***************************************************************************/
 /*                                                                         */
+/*                              dma 发送回调                                */
+/*                                                                         */
+/***************************************************************************/
+
+void on_uart_tx_dma_complted(uint16_t size) {
+    uint8_t *buffer;
+    uint32_t txsize;
+    chry_ringbuffer_linear_read_done(&cdc_handle.rb, size);
+    if (chry_ringbuffer_get_used(&cdc_handle.rb)) {
+        buffer = chry_ringbuffer_linear_read_setup(&cdc_handle.rb, &txsize);
+        bsp_uart_write_by_dma(buffer, txsize);
+    } else {
+        rt_sem_release (&uart_handle.tx_complte_sem);
+    }
+}
+
+/***************************************************************************/
+/*                                                                         */
 /*                              CDC 工作线程                                */
 /*                                                                         */
 /***************************************************************************/
@@ -131,9 +153,15 @@ void cdc_rx_thread_entry(void *param)
         }
 
         if (chry_ringbuffer_get_used(&cdc_handle.rb)) {
+            cdc_handle.uart_tx_working = RT_TRUE;
+            
             buffer = chry_ringbuffer_linear_read_setup(&cdc_handle.rb, &size);
+            // 启动dma传输
             bsp_uart_write_by_dma(buffer, size);
-            chry_ringbuffer_linear_read_done(&cdc_handle.rb, size);
+            // 等待dma传输完成
+            bsp_uart_wait_tx_dma_complted();
+
+            cdc_handle.uart_tx_working = RT_FALSE;
         }
 
         if (cdc_handle.rx_buffer_full == RT_FALSE) {
@@ -159,10 +187,12 @@ void cdc_ctrl_thread_entry(void *param)
         // 重置串口缓冲
         cdc_handle.rx_buffer_full = RT_FALSE;
         cdc_handle.tx_buffer_empty = RT_TRUE;
+        cdc_handle.uart_tx_working = RT_FALSE;
+        cdc_handle.uart_rx_working = RT_FALSE;
         chry_ringbuffer_reset(&cdc_handle.rb);
         chry_ringbuffer_reset(&uart_handle.rb);
         // 允许传输
-        cdc_handle.allow_transfer = true;
+        cdc_handle.allow_transfer = RT_TRUE;
         // 亮起uart指示灯
         for(uint8_t i = 0; i < 2; i++) {
             bsp_led_ctrl(BSP_LED_ID_COM_STA, 1);
@@ -170,6 +200,21 @@ void cdc_ctrl_thread_entry(void *param)
             bsp_led_ctrl(BSP_LED_ID_COM_STA, 0);
             rt_thread_mdelay(50);
         }
+    }
+}
+
+void cdc_sta_led_thread_entry(void *param)
+{
+    while (1) {
+        rt_thread_mdelay(1);
+        if (cdc_handle.allow_transfer == RT_FALSE) {
+            continue;
+        }
+        if (!(cdc_handle.uart_tx_working || cdc_handle.uart_rx_working)) {
+            bsp_led_ctrl(BSP_LED_ID_COM_STA, 0);
+            continue;
+        }
+        bsp_led_toggle(BSP_LED_ID_COM_STA);
     }
 }
 
@@ -181,6 +226,8 @@ void cdc_ctrl_thread_entry(void *param)
 
 int cdc_uart_env_init(void)
 {
+    uart_handle.dma_tx_complate_callback = on_uart_tx_dma_complted;
+
     rt_sem_init(&cdc_handle.lincoding_sem,   "cdc_lsem", 0, RT_IPC_FLAG_FIFO);
     rt_sem_init(&cdc_handle.data_ready_sem,  "cdc_rsem", 0, RT_IPC_FLAG_FIFO);
     chry_ringbuffer_init(&cdc_handle.rb,  cdc_handle.rb_buffer,  sizeof(cdc_handle.rb_buffer));
@@ -216,12 +263,23 @@ int cdc_uart_thread_init(void)
                    sizeof(cdc_ctrl_stack),
                    9, 
                    rt_tick_from_millisecond(1));
+
+    rt_thread_init(&cdc_sta_led_thread,
+                   "cdc_sta",
+                   cdc_sta_led_thread_entry,
+                   RT_NULL,
+                   &cdc_sta_led_stack[0],
+                   sizeof(cdc_sta_led_stack),
+                   21, 
+                   rt_tick_from_millisecond(1));
     
     rt_thread_startup(&cdc_tx_thread);
 
     rt_thread_startup(&cdc_rx_thread);
 
     rt_thread_startup(&cdc_ctrl_thread);
+
+    rt_thread_startup(&cdc_sta_led_thread);
 
     usb_init(0, 0);
 

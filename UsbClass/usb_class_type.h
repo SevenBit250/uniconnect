@@ -14,8 +14,10 @@ typedef struct {
     rt_bool_t rx_buffer_full;                        // 接收缓冲满
     rt_bool_t tx_buffer_empty;                       // 发送缓冲空
     rt_bool_t allow_transfer;                        // 允许数据传输
+    rt_bool_t uart_tx_working;
+    rt_bool_t uart_rx_working;
     struct rt_semaphore data_ready_sem;              // 数据就绪信号量
-    struct rt_semaphore lincoding_sem;               // 设备配置信号量 
+    struct rt_semaphore lincoding_sem;               // 设备配置信号量
 } usb_cdc_buffer_t;
 
 #endif

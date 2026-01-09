@@ -9,6 +9,7 @@
  * 2018-11-12     Ernest Chen  modify copyright
  */
  
+#include "bsp.h"
 #include "board.h"
 #include <stdint.h>
 
@@ -70,6 +71,8 @@ void rt_hw_board_init()
 
 void rt_hw_console_output(const char *str)
 {
+    uint32_t strlen = rt_strlen(str);
+    bsp_uart_write((const uint8_t*)str, strlen);
 }
 
 void SysTick_Handler(void) __attribute__((interrupt("WCH-Interrupt-fast")));

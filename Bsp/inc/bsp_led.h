@@ -17,6 +17,8 @@ void bsp_led_ctrl(uint8_t id, uint8_t onoff);
 
 void bsp_led_ctrl_bit(uint8_t onoff);
 
+void bsp_led_toggle(uint8_t id);
+
 
 #ifdef __cplusplus
  }

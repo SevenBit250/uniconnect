@@ -41,6 +41,11 @@ void bsp_led_ctrl(uint8_t id, uint8_t onoff)
     GPIO_WriteBit(led_group[id].port, led_group[id].pin, !onoff);
 }
 
+void bsp_led_toggle(uint8_t id) {
+    uint8_t sta = GPIO_ReadOutputDataBit(led_group[id].port, led_group[id].pin);
+    GPIO_WriteBit(led_group[id].port, led_group[id].pin, !sta);
+}
+
 static int bsp_led_init(void)
 {
     GPIO_InitTypeDef GPIO_InitStructure = {0};

@@ -23,9 +23,7 @@ static void monitor_thread_entry(void *param)
                 if (last_state != state && last_state == SYS_STA_USB_NOT_CONNECTED) {
                     bsp_led_ctrl_bit(0b00000);
                 }
-                bsp_led_ctrl(BSP_LED_ID_SYS_STA, 1);
-                rt_thread_mdelay(1000);
-                bsp_led_ctrl(BSP_LED_ID_SYS_STA, 0);
+                bsp_led_toggle(BSP_LED_ID_SYS_STA);
                 rt_thread_mdelay(1000);
             break;
 
