@@ -7,7 +7,7 @@
 #include "chry_ringbuffer.h"
 
 typedef struct {
-    uint8_t cdc_buffer[USB_RB_RX_BUFFER_SIZE];
+    uint8_t cdc_buffer[USB_CDC_BUFFER_SIZE];
     uint8_t rb_buffer[USB_RB_RX_BUFFER_SIZE];        // 数据缓冲区 - usage of the thread
     chry_ringbuffer_t rb;                            // 缓冲管理器
     struct cdc_line_coding lincoding;                // 行设置

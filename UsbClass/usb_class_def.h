@@ -12,7 +12,9 @@
 #define USB_CONFIG_SIZE (9 + CDC_ACM_DESCRIPTOR_LEN)
 
 /*!< mps usbfs: 64 */
-#define CDC_MAX_MPS 512
+#define CDC_MAX_MPS 512u
+
+#define USB_CDC_BUFFER_SIZE (CDC_MAX_MPS)
 
 /* ringbuffer缓冲区 */
-#define USB_RB_RX_BUFFER_SIZE 512u
+#define USB_RB_RX_BUFFER_SIZE (USB_CDC_BUFFER_SIZE * 2)

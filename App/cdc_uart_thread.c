@@ -1,3 +1,15 @@
+/**
+ * @file cdc_uart_thread.c
+ * @author awei (heqiweii@163.com)
+ * @brief cdc交互
+ * @version 0.1
+ * @date 2026-01-09
+ * 
+ * @copyright Copyright (c) 2026
+ * 
+ * cdc_rx_thread_entry: cdc rx -> uart tx
+ * cdc_tx_thread_entry: uart rx -> cdc tx
+ */
 #include "usbd_core.h"
 #include "usbd_cdc_acm.h"
 #include "usb_class.h"
@@ -154,7 +166,7 @@ void cdc_rx_thread_entry(void *param)
 
         if (chry_ringbuffer_get_used(&cdc_handle.rb)) {
             cdc_handle.uart_tx_working = RT_TRUE;
-            
+
             buffer = chry_ringbuffer_linear_read_setup(&cdc_handle.rb, &size);
             // 启动dma传输
             bsp_uart_write_by_dma(buffer, size);
