@@ -77,9 +77,9 @@ void cdc_uart_acm_bulk_in (uint8_t busid, uint8_t ep, uint32_t nbytes)
     uint32_t size;
     uint8_t *buffer;
     chry_ringbuffer_linear_read_done(&uart_handle.rb, nbytes);
-    if ((nbytes % usbd_get_ep_mps (busid, ep)) == 0 && nbytes) {
+    if ((nbytes % USB_CDC_BUFFER_SIZE) == 0 && nbytes) {
         /* send zlp */
-        usbd_ep_start_write (busid, CDC_IN_EP, NULL, 0);
+        usbd_ep_start_write (0, CDC_IN_EP, NULL, 0);
     } else {
         if (chry_ringbuffer_get_used(&uart_handle.rb)) {
             buffer = chry_ringbuffer_linear_read_setup(&uart_handle.rb, &size);
@@ -112,7 +112,7 @@ void usbd_cdc_acm_get_line_coding (uint8_t busid, uint8_t intf, struct cdc_line_
 /*                                                                         */
 /***************************************************************************/
 
-void on_uart_tx_dma_complted(uint16_t size) {
+void on_uart_tx_dma_completed(uint16_t size) {
     uint8_t *buffer;
     uint32_t txsize;
     chry_ringbuffer_linear_read_done(&cdc_handle.rb, size);
@@ -120,7 +120,7 @@ void on_uart_tx_dma_complted(uint16_t size) {
         buffer = chry_ringbuffer_linear_read_setup(&cdc_handle.rb, &txsize);
         bsp_uart_write_by_dma(buffer, txsize);
     } else {
-        rt_sem_release (&uart_handle.tx_complte_sem);
+        rt_sem_release (&uart_handle.tx_complete_sem);
     }
 }
 
@@ -149,6 +149,7 @@ void cdc_tx_thread_entry(void *param)
             cdc_handle.tx_buffer_empty = RT_FALSE;
             buffer = chry_ringbuffer_linear_read_setup (&uart_handle.rb, &size);
             usbd_ep_start_write (0, CDC_IN_EP, buffer, size);
+            // rt_kprintf("buck in size: %d  ret: %d\r\n", size, ret);
         }
     }
 }
@@ -171,7 +172,7 @@ void cdc_rx_thread_entry(void *param)
             // 启动dma传输
             bsp_uart_write_by_dma(buffer, size);
             // 等待dma传输完成
-            bsp_uart_wait_tx_dma_complted();
+            bsp_uart_wait_tx_dma_completed();
 
             cdc_handle.uart_tx_working = RT_FALSE;
         }
@@ -238,7 +239,7 @@ void cdc_sta_led_thread_entry(void *param)
 
 int cdc_uart_env_init(void)
 {
-    uart_handle.dma_tx_complate_callback = on_uart_tx_dma_complted;
+    uart_handle.dma_tx_complate_callback = on_uart_tx_dma_completed;
 
     rt_sem_init(&cdc_handle.lincoding_sem,   "cdc_lsem", 0, RT_IPC_FLAG_FIFO);
     rt_sem_init(&cdc_handle.data_ready_sem,  "cdc_rsem", 0, RT_IPC_FLAG_FIFO);

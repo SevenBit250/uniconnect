@@ -71,10 +71,10 @@ void bsp_uart_write_by_dma(const uint8_t *data, uint16_t size)
     DMA_Cmd (DMA1_Channel4, ENABLE);
 }
 
-void bsp_uart_wait_tx_dma_complted() 
+void bsp_uart_wait_tx_dma_completed() 
 {
     // 等待dma发送完成
-    rt_sem_take(&uart_handle.tx_complte_sem, RT_WAITING_FOREVER);
+    rt_sem_take(&uart_handle.tx_complete_sem, RT_WAITING_FOREVER);
 }
 
 static int bsp_uart_init(void)
@@ -146,7 +146,7 @@ INIT_BOARD_EXPORT(bsp_uart_init);
 static int bsp_uart_env_init(void)
 {
     rt_sem_init(&uart_handle.data_ready_sem, "uart_rx", 0, RT_IPC_FLAG_FIFO);
-    rt_sem_init(&uart_handle.tx_complte_sem, "uart_tx", 0, RT_IPC_FLAG_FIFO);
+    rt_sem_init(&uart_handle.tx_complete_sem, "uart_tx", 0, RT_IPC_FLAG_FIFO);
     chry_ringbuffer_init(&uart_handle.rb, uart_handle.rb_buffer, sizeof(uart_handle.rb_buffer));
     return 0;
 }
