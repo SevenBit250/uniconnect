@@ -205,8 +205,6 @@
 							"${project}/CherryUSB/common",
 							"${project}/CherryUSB/core",
 							"${project}/CherryUSB/port/ch32/ch32hs",
-							"${project}/UsbClass",
-							"${project}/Usb2Device",
 							"${project}/CherryRB",
 							"${project}/Bsp/inc",
 							"${project}/Bsp"

@@ -1,8 +1,12 @@
 #include "bsp_uart.h"
+#include "bsp_config.h"
 #include "ch32v30x.h"
 #include <rtthread.h>
 
-uart_buffer_t uart_handle;
+static __attribute__((aligned(4))) uint8_t dma_rx_buffer[UART_DMA_RX_BUFFER_SIZE];           // uart rx dma buffer
+static __attribute__((aligned(4))) uint8_t rb_uart_rx_buffer[UART_RB_RX_BUFFER_SIZE];        // ringbuffer for uart to host
+
+bsp_uart_buffer_t uart_handle;
 
 static uint16_t uart_tx_dma_size = 0;
 
@@ -71,7 +75,7 @@ void bsp_uart_write_by_dma(const uint8_t *data, uint16_t size)
     DMA_Cmd (DMA1_Channel4, ENABLE);
 }
 
-void bsp_uart_wait_tx_dma_completed() 
+void bsp_uart_wait_dma_write_completed() 
 {
     // 等待dma发送完成
     rt_sem_take(&uart_handle.tx_complete_sem, RT_WAITING_FOREVER);
@@ -131,9 +135,9 @@ static int bsp_uart_init(void)
     DMA_InitStructure.DMA_Priority                       = DMA_Priority_VeryHigh;
     DMA_InitStructure.DMA_M2M                            = DMA_M2M_Disable;
     DMA_InitStructure.DMA_PeripheralBaseAddr             = (uint32_t)(&USART1->DATAR);
-    DMA_InitStructure.DMA_MemoryBaseAddr                 = (uint32_t)uart_handle.dma_buffer;
+    DMA_InitStructure.DMA_MemoryBaseAddr                 = (uint32_t)dma_rx_buffer;
     DMA_InitStructure.DMA_DIR                            = DMA_DIR_PeripheralSRC;
-    DMA_InitStructure.DMA_BufferSize                     = sizeof (uart_handle.dma_buffer);
+    DMA_InitStructure.DMA_BufferSize                     = sizeof (dma_rx_buffer);
     DMA_Init (DMA1_Channel5, &DMA_InitStructure);
     DMA_ITConfig (DMA1_Channel5, DMA_IT_TC, ENABLE);
     DMA_Cmd (DMA1_Channel5, ENABLE);
@@ -147,17 +151,17 @@ static int bsp_uart_env_init(void)
 {
     rt_sem_init(&uart_handle.data_ready_sem, "uart_rx", 0, RT_IPC_FLAG_FIFO);
     rt_sem_init(&uart_handle.tx_complete_sem, "uart_tx", 0, RT_IPC_FLAG_FIFO);
-    chry_ringbuffer_init(&uart_handle.rb, uart_handle.rb_buffer, sizeof(uart_handle.rb_buffer));
+    chry_ringbuffer_init(&uart_handle.rb_uart_rx, rb_uart_rx_buffer, sizeof(rb_uart_rx_buffer));
     return 0;
 }
-INIT_ENV_EXPORT(bsp_uart_env_init);
+INIT_COMPONENT_EXPORT(bsp_uart_env_init);
 
 void DMA1_Channel4_IRQHandler (void) __attribute__ ((interrupt ("WCH-Interrupt-fast")));
 void DMA1_Channel4_IRQHandler (void) {
     rt_interrupt_enter();
     DMA_ClearITPendingBit (DMA1_IT_TC4);
-    if (uart_handle.dma_tx_complate_callback) {
-        uart_handle.dma_tx_complate_callback(uart_tx_dma_size);
+    if (uart_handle.write_completed_callback) {
+        uart_handle.write_completed_callback(uart_tx_dma_size);
     }
     rt_interrupt_leave();
 }
@@ -166,9 +170,9 @@ void DMA1_Channel5_IRQHandler (void) __attribute__ ((interrupt ("WCH-Interrupt-f
 void DMA1_Channel5_IRQHandler (void) {
     rt_interrupt_enter();
     DMA_Cmd(DMA1_Channel5, DISABLE);
-    DMA_SetCurrDataCounter(DMA1_Channel5, sizeof (uart_handle.dma_buffer));
+    DMA_SetCurrDataCounter(DMA1_Channel5, sizeof (dma_rx_buffer));
     DMA_Cmd (DMA1_Channel5, ENABLE);
-    chry_ringbuffer_write (&uart_handle.rb, uart_handle.dma_buffer, sizeof (uart_handle.dma_buffer));
+    chry_ringbuffer_write (&uart_handle.rb_uart_rx, dma_rx_buffer, sizeof (dma_rx_buffer));
     rt_sem_release (&uart_handle.data_ready_sem);
     DMA_ClearITPendingBit (DMA1_IT_TC5);
     rt_interrupt_leave();
@@ -178,12 +182,12 @@ void USART1_IRQHandler (void) __attribute__ ((interrupt ("WCH-Interrupt-fast")))
 void USART1_IRQHandler (void) {
     if (USART_GetITStatus(USART1, USART_IT_IDLE) != RESET){
         rt_interrupt_enter();
-        uint16_t rxlen = (sizeof (uart_handle.dma_buffer) - DMA_GetCurrDataCounter (DMA1_Channel5));
+        uint16_t rxlen = (sizeof (dma_rx_buffer) - DMA_GetCurrDataCounter (DMA1_Channel5));
         DMA_Cmd (DMA1_Channel5, DISABLE);
-        DMA_SetCurrDataCounter (DMA1_Channel5, sizeof (uart_handle.dma_buffer));
+        DMA_SetCurrDataCounter (DMA1_Channel5, sizeof (dma_rx_buffer));
         DMA_Cmd (DMA1_Channel5, ENABLE);
         USART_ReceiveData(USART1);
-        chry_ringbuffer_write (&uart_handle.rb, uart_handle.dma_buffer, rxlen);
+        chry_ringbuffer_write (&uart_handle.rb_uart_rx, dma_rx_buffer, rxlen);
         rt_sem_release (&uart_handle.data_ready_sem);
         rt_interrupt_leave();
     }
