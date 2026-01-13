@@ -4,32 +4,53 @@
 #include "bsp_config.h"
 #include "main.h"
 
-/*!< config descriptor size */
-#define USB_CONFIG_SIZE (9 + CDC_ACM_DESCRIPTOR_LEN)
 
+
+
+
+/***************************************************************************/
+/*                                                                         */
+/*                                   cdc相关                               */
+/*                                                                         */
+/***************************************************************************/
 bsp_usb_cdc_buffer_t cdc_handle;
 static struct usbd_interface cdc_intf0;
 static struct usbd_interface cdc_intf1;
 static __attribute__((aligned(4))) uint8_t cdc_rx_buffer[USB_CDC_BUFFER_SIZE];
 static __attribute__((aligned(4))) uint8_t rb_cdc_rx_buffer[USB_RB_CDC_RX_BUFFER_SIZE];
 
-int bsp_usb_cdc_ep_start_read(uint8_t busid) {
+int bsp_usb_cdc_ep_start_read(uint8_t busid) 
+{
     return usbd_ep_start_read(busid, CDC_OUT_EP, cdc_rx_buffer, sizeof(cdc_rx_buffer));
 }
-
-int bsp_usb_cdc_ep_start_write(uint8_t busid, const uint8_t *data, uint32_t data_len) {
+int bsp_usb_cdc_ep_start_write(uint8_t busid, const uint8_t *data, uint32_t data_len) 
+{
     return usbd_ep_start_write(busid, CDC_IN_EP, data, data_len);
 }
-
 uint8_t* bsp_usb_cdc_get_buffer(void)
 {
     return cdc_rx_buffer;
 }
-
 int bsp_usb_cdc_get_buffer_size(void)
 {
     return sizeof(cdc_rx_buffer);
 }
+
+/***************************************************************************/
+/*                                                                         */
+/*                                   dap相关                               */
+/*                                                                         */
+/***************************************************************************/
+bsp_usb_dap_buffer_t dap_handle;
+
+/***************************************************************************/
+/*                                                                         */
+/*                                   usb总线配置                           */
+/*                                                                         */
+/***************************************************************************/
+
+/*!< config descriptor size */
+#define USB_CONFIG_SIZE (9 + CDC_ACM_DESCRIPTOR_LEN)
 
 static const uint8_t device_descriptor[] = {
     USB_DEVICE_DESCRIPTOR_INIT (USB_2_0, 0xEF, 0x02, 0x01, USBD_VID, USBD_PID, 0x0100, 0x01)

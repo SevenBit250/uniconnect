@@ -23,4 +23,12 @@
 #define CDC_CTRL_THREAD_STACK_SIZE         512u
 #define CDC_STA_LED_THREAD_STACK_SIZE      256u
 
+/**
+ * @brief DAP服务线程优先级和线程栈配置
+ * 
+ */
+#define DAP_THREAD_PRIORITY        11
+
+#define DAP_THREAD_STACK_SIZE      1024u
+
 #endif

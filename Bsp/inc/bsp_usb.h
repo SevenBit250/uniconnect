@@ -23,6 +23,13 @@ typedef struct {
     void(*cdc_event_hander_callback)(uint8_t busid, uint8_t event);
 } bsp_usb_cdc_buffer_t;
 
+typedef struct {
+    struct rt_semaphore request_sem;              // 数据就绪信号量
+    struct usbd_endpoint in_ep;
+    struct usbd_endpoint out_ep;
+    void(*dap_event_hander_callback)(uint8_t busid, uint8_t event);
+} bsp_usb_dap_buffer_t;
+
 int bsp_usb_cdc_ep_start_read(uint8_t busid);
 
 int bsp_usb_cdc_ep_start_write(uint8_t busid, const uint8_t *data, uint32_t data_len);

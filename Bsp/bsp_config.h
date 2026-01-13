@@ -2,9 +2,12 @@
 #define __BSP_CONFIG_H
 
 /*!< endpoint address */
-#define CDC_IN_EP          0x81
-#define CDC_OUT_EP         0x02
-#define CDC_INT_EP         0x83
+#define DAP_IN_EP          0x81
+#define DAP_OUT_EP         0x02
+
+#define CDC_IN_EP          0x82
+#define CDC_OUT_EP         0x04
+#define CDC_INT_EP         0x85
 
 #define USBD_VID           0x0D28
 #define USBD_PID           0x0204
