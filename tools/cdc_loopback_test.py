@@ -15,7 +15,7 @@ import threading
 import serial
 import serial.tools.list_ports
 
-VID, PID = 0x0D28, 0x0204
+VID, PID = 0x0D28, 0x0218
 
 
 def find_port():

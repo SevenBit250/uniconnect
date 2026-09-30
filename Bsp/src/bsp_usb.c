@@ -260,7 +260,7 @@ bsp_usb_dap_buffer_t dap_handle;
 
 /*!< config descriptor size */
 #define VENDOR_CAN_IF_DESC_SIZE (9 + 7 + 7)
-#define CANUSB_SOLO_TEST 1   /* 单接口纯CAN设备: Zadig绑定用(复合接口子节点因Error不生成) */
+#define CANUSB_SOLO_TEST 0   /* 复合模式=产品配置: CDC+CAN双接口 */
 #if CANUSB_SOLO_TEST
 #define USB_CONFIG_SIZE (9 + VENDOR_CAN_IF_DESC_SIZE)
 #else
@@ -307,10 +307,9 @@ static const uint8_t msosv2_descriptor_set[] = {
 
 /* BOS(33B): MS OS 2.0平台能力, vendor code 0x20 */
 static const uint8_t bos_descriptor[] = {
-    0x05, 0x0F, 0x28, 0x00, 0x02, 0x07, 0x10, 0x02, 0x02, 0x00, 0x00, 0x00,
-    0x1C, 0x10, 0x05, 0x00, 0xDF, 0x60, 0xDD, 0xD8, 0x89, 0x45, 0xC7, 0x4C,
-    0x9C, 0xD2, 0x65, 0x9D, 0x9E, 0x64, 0x8A, 0x9F, 0x00, 0x00, 0x03, 0x06,
-    0xAA, 0x00, 0x20, 0x00,
+    0x05, 0x0F, 0x21, 0x00, 0x01, 0x1C, 0x10, 0x05, 0x00, 0xDF, 0x60, 0xDD,
+    0xD8, 0x89, 0x45, 0xC7, 0x4C, 0x9C, 0xD2, 0x65, 0x9D, 0x9E, 0x64, 0x8A,
+    0x9F, 0x00, 0x00, 0x03, 0x06, 0xAA, 0x00, 0x20, 0x00,
 };
 
 static struct usb_msosv2_descriptor msosv2_desc = {
@@ -406,11 +405,14 @@ static struct usbd_interface can_vendor_intf;
 static int bsp_usb_init(void)
 {
     usbd_desc_register (0, &usb_descriptor);
-    /* CAN厂商接口: SOLO测试时第一个注册=接口0 */
+#if CANUSB_SOLO_TEST
+    /* SOLO: CAN独占接口0 */
     memset(&can_vendor_intf, 0, sizeof(can_vendor_intf));
     usbd_add_interface (0, &can_vendor_intf);
-#if !CANUSB_SOLO_TEST
-    /* cdc config */
+#else
+    /* 复合: 注册顺序决定intf_num, 必须与描述符一致 -- CDC先注册拿0/1,
+     * CAN后注册拿2(SOLO实验时CAN曾前置抢0号, Windows给CDC接口0的类请求
+     * 被路由到无处理器的CAN接口→STALL→usbser打开报错31的根因) */
     cdc_handle.in_ep.ep_addr = CDC_IN_EP;
     cdc_handle.out_ep.ep_addr = CDC_OUT_EP;
     cdc_handle.out_ep.ep_cb = bsp_usb_cdc_bulk_out;
@@ -418,6 +420,8 @@ static int bsp_usb_init(void)
     usbd_add_interface (0, usbd_cdc_acm_init_intf (0, &cdc_intf1));
     usbd_add_endpoint (0, &cdc_handle.out_ep);
     usbd_add_endpoint (0, &cdc_handle.in_ep);
+    memset(&can_vendor_intf, 0, sizeof(can_vendor_intf));
+    usbd_add_interface (0, &can_vendor_intf);
 #endif
     canusb_handle.in_ep.ep_addr = CAN_IF_IN_EP;
     canusb_handle.out_ep.ep_addr = CAN_IF_OUT_EP;

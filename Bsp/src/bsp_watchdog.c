@@ -12,8 +12,10 @@
 #include "bsp_watchdog.h"
 #include "bsp_usb.h"
 
-/* USBHS基址0x40022000, UEP4_RX_DMA偏移0x28 (USBHSD_TypeDef布局推算) */
-#define USBHS_UEP4_RX_DMA (*(volatile uint32_t *)(0x40022000u + 0x28u))
+/* USBHS真实基址0x40023400(非0x40022000!), UEP4_RX_DMA偏移0x2C
+ * (USBHSD_TypeDef: RX_DMA组从+0x20起, UEP4=+0x2C) -- 错误基址读到无关AHB外设
+ * 垃圾值, 复合模式CDC武装后watchdog必误杀(0217全灭根因, 曾污染复合模式测试) */
+#define USBHS_UEP4_RX_DMA (*(volatile uint32_t *)(0x40023400u + 0x2Cu))
 
 /* 崩溃盒(与ch32v30x_it.c共用), [12..15]为看门狗槽 */
 #define CRASH_BOX ((volatile uint32_t *)0x2000F000)

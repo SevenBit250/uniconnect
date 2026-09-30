@@ -5,8 +5,8 @@ import sys, time, struct
 import os
 import usb.core, usb.util, usb.backend.libusb1
 
-VID, PID = 0x0D28, 0x0215
-IF_NUM, EP_OUT, EP_IN = 0, 0x06, 0x83   # SOLO调试固件=接口0
+VID, PID = 0x0D28, 0x0218
+IF_NUM, EP_OUT, EP_IN = 2, 0x06, 0x83   # 复合模式: CAN=接口2
 DLL = r'C:\Users\25293\AppData\Local\Programs\Python\Python312\Lib\site-packages\libusb\_platform\windows\x86_64\libusb-1.0.dll'
 
 CANP_TX, CANP_CTRL = 0x01, 0x02
