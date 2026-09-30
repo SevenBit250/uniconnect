@@ -286,14 +286,15 @@ void USBD_IRQHandler(uint8_t busid)
 
     intflag = USBHS_DEVICE->INT_FG;
 
-    /* 循环处理至无pending事务: IN/OUT双向高并发时, 处理一个事务期间
-     * (含bulk_in链式续发)另一方向的完成事件到达, 单次处理模式下尾部
-     * INT_FG写1清除会把新事件吞掉(该包永远不被提交, 5M丢尾的根因) */
+    /* TRANSFER标志保留至循环体末尾(端点重武装之后)才清除:
+     * RM RB_UC_INT_BUSY(CTRL bit3)语义为标志置位期间SIE自动NAK所有新事务,
+     * 若在入口提前清除, 处理当前包期间到达的下一个OUT包会被ACK进尚未换出的
+     * 旧RX缓冲, 覆写正在消费的数据(HS背靠背包4M/5M丢块根因, FS包间隔大不触发)。
+     * 标志清除后主机PING重试的新事务由循环重查继续处理 */
     while (intflag & USBHS_TRANSFER_FLAG) {
-        ep_idx = (USBHS_DEVICE->INT_ST) & MASK_UIS_ENDP;
-        token = (((USBHS_DEVICE->INT_ST) & MASK_UIS_TOKEN) >> 4) & 0x03;
-
-        USBHS_DEVICE->INT_FG = USBHS_TRANSFER_FLAG;
+        uint32_t int_st = USBHS_DEVICE->INT_ST; /* 快照: 处理期间NAK重试可能刷新INT_ST */
+        ep_idx = int_st & MASK_UIS_ENDP;
+        token = ((int_st & MASK_UIS_TOKEN) >> 4) & 0x03;
 
         if (token == PID_IN) {
             USB_SET_TX_CTRL(ep_idx, (USB_GET_TX_CTRL(ep_idx) & ~(USBHS_EP_T_RES_MASK | USBHS_EP_T_TOG_MASK)) | USBHS_EP_T_RES_NAK | USBHS_EP_T_TOG_0);
@@ -378,13 +379,13 @@ void USBD_IRQHandler(uint8_t busid)
                     ep0_rx_data_toggle ^= 1;
                 }
             } else {
-                if (!(USBHS_DEVICE->INT_ST & USBHS_DEV_UIS_TOG_OK)) {
+                if (!(int_st & USBHS_DEV_UIS_TOG_OK)) {
                     extern volatile uint32_t g_out_tog_drop;
                     g_out_tog_drop++;   /* TOG_OK失败被丢弃的包(已ACK, 数据黑洞) */
                 }
                 if ((g_ch32_usbhs_udc.out_ep[ep_idx].xfer_buf != NULL) &&
                     (g_ch32_usbhs_udc.out_ep[ep_idx].xfer_len != 0) &&
-                    (USBHS_DEVICE->INT_ST & USBHS_DEV_UIS_TOG_OK)) {
+                    (int_st & USBHS_DEV_UIS_TOG_OK)) {
                     /* 守卫: 总线复位会memset端点状态, 挂起的陈旧OUT完成事件若继续
                      * 处理, xfer_len下溢成巨值会走续传分支, 把RX_DMA写成垃圾地址,
                      * USB OUT DMA随即把数据包写入任意RAM(实测涂烂黑匣子/TCB区) */
@@ -406,7 +407,10 @@ void USBD_IRQHandler(uint8_t busid)
                 }
             }
         }
-        intflag = USBHS_DEVICE->INT_FG;   /* 重查: 处理期间新到达的事务 */
+        /* 端点重武装已完成, 现在清除标志放行下一事务(INT_BUSY auto-NAK解除),
+         * 后续OUT包将落入新RX缓冲, 不会覆写本循环体刚消费的数据 */
+        USBHS_DEVICE->INT_FG = USBHS_TRANSFER_FLAG;
+        intflag = USBHS_DEVICE->INT_FG;   /* 重查: 清除后立即到达的事务 */
     }
 
     if (intflag & USBHS_SETUP_FLAG) {
