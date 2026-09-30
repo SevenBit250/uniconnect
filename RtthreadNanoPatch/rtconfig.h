@@ -35,7 +35,11 @@
 
 // <o>the stack size of main thread<1-4086>
 //  <i>Default: 512
-#define RT_MAIN_THREAD_STACK_SIZE     1024
+#define RT_MAIN_THREAD_STACK_SIZE     2048
+
+/* idle线程栈: CPU大部分时间在idle上运行, WCH-Interrupt-fast的C调用帧压在被中断
+ 线程的栈上, -O0下USB中断链可达1KB+, 256B的idle栈必被砸穿 */
+#define IDLE_THREAD_STACK_SIZE        4096
 
 // </h>
 

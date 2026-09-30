@@ -18,10 +18,11 @@
 #define CDC_CTRL_THREAD_PRIORITY           9
 #define CDC_STA_LED_THREAD_PRIORITY        21
 
-#define CDC_TX_THREAD_STACK_SIZE           1024u
-#define CDC_RX_THREAD_STACK_SIZE           1024u
-#define CDC_CTRL_THREAD_STACK_SIZE         512u
-#define CDC_STA_LED_THREAD_STACK_SIZE      256u
+/* 线程栈需容纳线程自身调用链 + 落在其上的中断C调用帧(-O0帧很大) */
+#define CDC_TX_THREAD_STACK_SIZE           4096u
+#define CDC_RX_THREAD_STACK_SIZE           4096u
+#define CDC_CTRL_THREAD_STACK_SIZE         4096u
+#define CDC_STA_LED_THREAD_STACK_SIZE      512u
 
 /**
  * @brief DAP服务线程优先级和线程栈配置

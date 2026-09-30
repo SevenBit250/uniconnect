@@ -202,9 +202,9 @@ int usbd_ep_start_write(uint8_t busid, const uint8_t ep, const uint8_t *data, ui
     if (!g_ch32_usbhs_udc.in_ep[ep_idx].ep_enable) {
         return -2;
     }
-    // if ((uint32_t)data & 0x03) {
-    //     return -3;
-    // }
+    if ((uint32_t)data & 0x03) {
+        return -3;
+    }
 
     g_ch32_usbhs_udc.in_ep[ep_idx].xfer_buf = (uint8_t *)data;
     g_ch32_usbhs_udc.in_ep[ep_idx].xfer_len = data_len;
@@ -251,9 +251,9 @@ int usbd_ep_start_read(uint8_t busid, const uint8_t ep, uint8_t *data, uint32_t 
     if (!g_ch32_usbhs_udc.out_ep[ep_idx].ep_enable) {
         return -2;
     }
-    // if ((uint32_t)data & 0x03) {
-    //     return -3;
-    // }
+    if ((uint32_t)data & 0x03) {
+        return -3;
+    }
 
     g_ch32_usbhs_udc.out_ep[ep_idx].xfer_buf = (uint8_t *)data;
     g_ch32_usbhs_udc.out_ep[ep_idx].xfer_len = data_len;

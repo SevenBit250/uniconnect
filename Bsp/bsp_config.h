@@ -16,15 +16,14 @@
 
 /*!< mps usbfs: 64 */
 #define CDC_MAX_MPS 512u
-/* cdc rx 缓冲长度 */
-#define USB_CDC_BUFFER_SIZE (CDC_MAX_MPS)
-/* cdc rx to uart 缓冲长度 */
-#define USB_RB_CDC_RX_BUFFER_SIZE (USB_CDC_BUFFER_SIZE * 2)
+
+/* cdc out(usb->uart) 块缓冲池: USB OUT直接落块, 零拷贝交接UART DMA (块首恒4字节对齐) */
+#define USB_CDC_OUT_BLOCK_SIZE  512u   /* = USB HS bulk MPS */
+#define USB_CDC_OUT_BLOCK_COUNT 8u     /* 池深 8*512=4KB */
 
 
-/* uart rx to cdc 缓冲区长度 */
-#define UART_RB_RX_BUFFER_SIZE 1024u
-/* uart dma rx 缓冲区长度 */
-#define UART_DMA_RX_BUFFER_SIZE   512u
+/* uart rx 块缓冲池: DMA直接落块, 零拷贝交接USBHS DMA (块首恒4字节对齐) */
+#define UART_RX_BLOCK_SIZE   512u   /* = USB HS bulk MPS */
+#define UART_RX_BLOCK_COUNT  8u     /* 池深 8*512=4KB */
 
 #endif

@@ -2,20 +2,20 @@
  * @file cdc_uart_thread.c
  * @author awei (heqiweii@163.com)
  * @brief cdc交互
- * @version 0.1
- * @date 2026-01-09
- * 
+ * @version 0.2
+ * @date 2026-09-29
+ *
  * @copyright Copyright (c) 2026
- * 
- * cdc_rx_thread_entry: cdc rx -> uart tx
- * cdc_tx_thread_entry: uart rx -> cdc tx
+ *
+ * 双向块缓冲零拷贝:
+ *   uart->usb: cdc_tx_thread起步发送, bulk_in回调零唤醒续传+回收
+ *   usb->uart: cdc_rx_thread取块直发UART DMA, 发完归还+续读
  */
 #include "config.h"
 #include "usbd_core.h"
 #include "usbd_cdc_acm.h"
 #include "rtthread.h"
-#include "completion.h"
-#include "chry_ringbuffer.h"
+#include "rthw.h"
 #include "bsp.h"
 
 // cdc和uart句柄
@@ -34,60 +34,73 @@ ALIGN(RT_ALIGN_SIZE) static char cdc_rx_stack[CDC_RX_THREAD_STACK_SIZE];
 ALIGN(RT_ALIGN_SIZE) static char cdc_ctrl_stack[CDC_CTRL_THREAD_STACK_SIZE];
 ALIGN(RT_ALIGN_SIZE) static char cdc_sta_led_stack[CDC_STA_LED_THREAD_STACK_SIZE];
 
+// 在途跟踪: 线控reset时作为例外保留, 由各自完成路径归还
+static uart_rx_desc_t cdc_tx_inflight;                 // USB IN在途(uart->usb), staged暂存槽
+static volatile uint8_t cdc_tx_inflight_valid = 0;
+static volatile uint8_t *cdc_uart_tx_block = RT_NULL;  // UART TX在途(usb->uart)
+
 
 /***************************************************************************/
 /*                                                                         */
-/*                           CherryUSB 回调和端点                           */
+/*                           CherryUSB 回调                                 */
 /*                                                                         */
 /***************************************************************************/
 void cdc_uart_event_handler(uint8_t busid, uint8_t event)
 {
+    (void)busid;
     switch (event) {
         case USBD_EVENT_RESET:
             cdc_handle.allow_transfer = RT_FALSE;
             break;
         case USBD_EVENT_CONFIGURED:
-            bsp_usb_cdc_ep_start_read(busid);
+            /* Windows在打开串口/错误恢复时会发USB总线复位, 复位后不会再发
+             * 线控变更(set_line_coding被memcmp去重), allow_transfer会永久关闭.
+             * 已有有效线控时释放信号量, 由ctrl线程重建串口/双向池并重新放行 */
+            if (lincoding.dwDTERate != 0) {
+                rt_sem_release(&cdc_handle.lincoding_sem);
+            }
             break;
         default:
             break;
     }
 }
 
-void cdc_uart_acm_bulk_out (uint8_t busid, uint8_t ep, uint32_t nbytes) 
+/* USB IN完成(uart->usb): 归还在途块, ZLP或零唤醒续发下一块 (USB ISR上下文) */
+void cdc_uart_acm_bulk_in (uint8_t busid, uint8_t ep, uint32_t nbytes)
 {
-    (void)busid;
-    chry_ringbuffer_write(&cdc_handle.rb_cdc_rx, bsp_usb_cdc_get_buffer(), nbytes);
-    if (chry_ringbuffer_get_free(&cdc_handle.rb_cdc_rx) >= bsp_usb_cdc_get_buffer_size()) {
-        bsp_usb_cdc_ep_start_read(busid);
-    } else {
-        cdc_handle.rx_buffer_full = RT_TRUE;
+    (void)ep;
+    uart_rx_desc_t d;
+    if (cdc_tx_inflight_valid) {
+        cdc_tx_inflight_valid = 0;
+        bsp_uart_rx_release(&cdc_tx_inflight);
+        g_dbg.in_recycle++;
     }
-    rt_sem_release(&cdc_handle.data_ready_sem);
-}
-
-void cdc_uart_acm_bulk_in (uint8_t busid, uint8_t ep, uint32_t nbytes) 
-{
-    (void)busid;
-    uint32_t size;
-    uint8_t *buffer;
-    chry_ringbuffer_linear_read_done(&uart_handle.rb_uart_rx, nbytes);
-    if ((nbytes % bsp_usb_cdc_get_buffer_size()) == 0 && nbytes) {
-        /* send zlp */
+    if (nbytes && (nbytes % bsp_usb_cdc_get_mps()) == 0) {
+        /* 满512整块: 发ZLP标记传输边界, ZLP完成后再续下一块 */
+        g_dbg.in_zlp++;
         bsp_usb_cdc_ep_start_write(busid, NULL, 0);
-    } else {
-        if (chry_ringbuffer_get_used(&uart_handle.rb_uart_rx)) {
-            buffer = chry_ringbuffer_linear_read_setup(&uart_handle.rb_uart_rx, &size);
-            bsp_usb_cdc_ep_start_write(busid, buffer, size);
-        } else {
+    } else if (bsp_uart_rx_pop(&d)) {
+        g_dbg.in_pop++;
+        cdc_tx_inflight = d;
+        cdc_tx_inflight_valid = 1;
+        int ret = bsp_usb_cdc_ep_start_write(busid, d.ptr, d.len);
+        if (ret != 0) {
+            /* 发起失败必须回滚, 否则永远等不到bulk_in而永久死锁 */
+            g_dbg.in_write_err++;
+            g_dbg.in_write_ret = (uint32_t)ret;
+            cdc_tx_inflight_valid = 0;
+            bsp_uart_rx_release(&cdc_tx_inflight);
             cdc_handle.tx_buffer_empty = RT_TRUE;
         }
+    } else {
+        cdc_handle.tx_buffer_empty = RT_TRUE;
     }
 }
 
-void usbd_cdc_acm_set_line_coding (uint8_t busid, uint8_t intf, struct cdc_line_coding *line_coding) 
+void usbd_cdc_acm_set_line_coding (uint8_t busid, uint8_t intf, struct cdc_line_coding *line_coding)
 {
     (void)busid;
+    (void)intf;
     if (memcmp (line_coding, (uint8_t *)&lincoding, sizeof (struct cdc_line_coding)) != 0) {
         memcpy ((uint8_t *)&lincoding, line_coding, sizeof (struct cdc_line_coding));
         cdc_handle.allow_transfer = RT_FALSE;
@@ -95,28 +108,11 @@ void usbd_cdc_acm_set_line_coding (uint8_t busid, uint8_t intf, struct cdc_line_
     }
 }
 
-void usbd_cdc_acm_get_line_coding (uint8_t busid, uint8_t intf, struct cdc_line_coding *line_coding) 
+void usbd_cdc_acm_get_line_coding (uint8_t busid, uint8_t intf, struct cdc_line_coding *line_coding)
 {
     (void)busid;
+    (void)intf;
     memcpy (line_coding, (uint8_t *)&lincoding, sizeof (struct cdc_line_coding));
-}
-
-/***************************************************************************/
-/*                                                                         */
-/*                              dma 发送回调                                */
-/*                                                                         */
-/***************************************************************************/
-
-void on_uart_tx_dma_completed(uint16_t size) {
-    uint8_t *buffer;
-    uint32_t txsize;
-    chry_ringbuffer_linear_read_done(&cdc_handle.rb_cdc_rx, size);
-    if (chry_ringbuffer_get_used(&cdc_handle.rb_cdc_rx)) {
-        buffer = chry_ringbuffer_linear_read_setup(&cdc_handle.rb_cdc_rx, &txsize);
-        bsp_uart_write_by_dma(buffer, txsize);
-    } else {
-        rt_sem_release (&uart_handle.tx_complete_sem);
-    }
 }
 
 /***************************************************************************/
@@ -125,33 +121,41 @@ void on_uart_tx_dma_completed(uint16_t size) {
 /*                                                                         */
 /***************************************************************************/
 
+/* uart->usb: 起步发送, 后续块在bulk_in回调中续传 */
 void cdc_tx_thread_entry(void *param)
 {
-    uint32_t size;
-    uint8_t *buffer;
+    uart_rx_desc_t d;
     while (1) {
         rt_sem_take(&uart_handle.data_ready_sem, RT_WAITING_FOREVER);
 
         if (cdc_handle.allow_transfer == RT_FALSE) {
             continue;
         }
-
         if (cdc_handle.tx_buffer_empty == RT_FALSE) {
             continue;
         }
-
-        if (chry_ringbuffer_get_used(&uart_handle.rb_uart_rx)) {
+        if (bsp_uart_rx_pop(&d)) {
+            g_dbg.in_pop++;
             cdc_handle.tx_buffer_empty = RT_FALSE;
-            buffer = chry_ringbuffer_linear_read_setup (&uart_handle.rb_uart_rx, &size);
-            bsp_usb_cdc_ep_start_write(0, buffer, size);
+            cdc_tx_inflight = d;
+            cdc_tx_inflight_valid = 1;
+            int ret = bsp_usb_cdc_ep_start_write(0, d.ptr, d.len);
+            if (ret != 0) {
+                g_dbg.in_write_err++;
+                g_dbg.in_write_ret = (uint32_t)ret;
+                cdc_tx_inflight_valid = 0;
+                bsp_uart_rx_release(&cdc_tx_inflight);
+                cdc_handle.tx_buffer_empty = RT_TRUE;   /* 回滚避免死锁 */
+            }
         }
     }
 }
 
+/* usb->uart: 取OUT块直发UART DMA, 发完归还, 池满时OUT端点NAK背压 */
 void cdc_rx_thread_entry(void *param)
 {
-    uint32_t size;
-    uint8_t *buffer;
+    uint8_t *block;
+    uint16_t len;
     while (1) {
         rt_sem_take(&cdc_handle.data_ready_sem, RT_WAITING_FOREVER);
 
@@ -159,25 +163,24 @@ void cdc_rx_thread_entry(void *param)
             continue;
         }
 
-        if (chry_ringbuffer_get_used(&cdc_handle.rb_cdc_rx)) {
+        while (bsp_usb_cdc_rx_pop(&block, &len)) {
+            if (len == 0) {
+                /* 防御: 空块直接归还 */
+                bsp_usb_cdc_rx_recycle(block);
+                continue;
+            }
             cdc_handle.uart_tx_working = RT_TRUE;
-
-            buffer = chry_ringbuffer_linear_read_setup(&cdc_handle.rb_cdc_rx, &size);
-            // 启动dma传输
-            bsp_uart_write_by_dma(buffer, size);
-            // 等待dma传输完成
+            cdc_uart_tx_block = block;
+            bsp_uart_write_by_dma(block, len);
             bsp_uart_wait_dma_write_completed();
-
             cdc_handle.uart_tx_working = RT_FALSE;
-        }
+            cdc_uart_tx_block = RT_NULL;
+            bsp_usb_cdc_rx_recycle(block);
+            bsp_usb_cdc_rx_try_resume();
 
-        if (cdc_handle.rx_buffer_full == RT_FALSE) {
-            continue;
-        }
-
-        if (chry_ringbuffer_get_free(&cdc_handle.rb_cdc_rx) >= bsp_usb_cdc_get_buffer_size()) {
-            cdc_handle.rx_buffer_full = RT_FALSE;
-            bsp_usb_cdc_ep_start_read(0);
+            if (cdc_handle.allow_transfer == RT_FALSE) {
+                break;
+            }
         }
     }
 }
@@ -186,15 +189,30 @@ void cdc_ctrl_thread_entry(void *param)
 {
     while (1) {
         rt_sem_take(&cdc_handle.lincoding_sem, RT_WAITING_FOREVER);
+        /* 调试: 魔法波特率 -> 回传计数器快照, 不动串口与缓冲 */
+        if (lincoding.dwDTERate == 1234567) {
+            static __attribute__((aligned(4))) uint8_t snap[sizeof(bsp_dbg_t)];
+            memcpy(snap, &g_dbg, sizeof(bsp_dbg_t));
+            cdc_handle.allow_transfer = RT_TRUE;
+            if (cdc_handle.tx_buffer_empty) {
+                cdc_handle.tx_buffer_empty = RT_FALSE;
+                bsp_usb_cdc_ep_start_write(0, snap, sizeof(bsp_dbg_t));
+            }
+            continue;
+        }
         // 更新串口配置
         bsp_uart_config (lincoding.dwDTERate, lincoding.bCharFormat, lincoding.bParityType);
-        // 重置串口缓冲
-        cdc_handle.rx_buffer_full = RT_FALSE;
+        // 双向重建缓冲: 在途块作为例外保留, 由各自完成路径归还
+        {
+            rt_base_t level = rt_hw_interrupt_disable();
+            bsp_uart_rx_reset();
+            bsp_usb_cdc_rx_reset((uint8_t *)cdc_uart_tx_block);
+            rt_hw_interrupt_enable(level);
+        }
+        // 重置发送状态
         cdc_handle.tx_buffer_empty = RT_TRUE;
         cdc_handle.uart_tx_working = RT_FALSE;
         cdc_handle.uart_rx_working = RT_FALSE;
-        chry_ringbuffer_reset(&cdc_handle.rb_cdc_rx);
-        chry_ringbuffer_reset(&uart_handle.rb_uart_rx);
         // 允许传输
         cdc_handle.allow_transfer = RT_TRUE;
         // 亮起uart指示灯
@@ -230,10 +248,7 @@ void cdc_sta_led_thread_entry(void *param)
 
 int cdc_uart_env_init(void)
 {
-    uart_handle.write_completed_callback = on_uart_tx_dma_completed;
-
     cdc_handle.in_ep.ep_cb = cdc_uart_acm_bulk_in;
-    cdc_handle.out_ep.ep_cb = cdc_uart_acm_bulk_out;
     cdc_handle.cdc_event_hander_callback = cdc_uart_event_handler;
     return 0;
 }
@@ -247,7 +262,7 @@ int cdc_uart_thread_init(void)
                    RT_NULL,
                    &cdc_tx_stack[0],
                    sizeof(cdc_tx_stack),
-                   CDC_TX_THREAD_PRIORITY, 
+                   CDC_TX_THREAD_PRIORITY,
                    rt_tick_from_millisecond(1));
 
     rt_thread_init(&cdc_rx_thread,
@@ -256,7 +271,7 @@ int cdc_uart_thread_init(void)
                    RT_NULL,
                    &cdc_rx_stack[0],
                    sizeof(cdc_rx_stack),
-                   CDC_RX_THREAD_PRIORITY, 
+                   CDC_RX_THREAD_PRIORITY,
                    rt_tick_from_millisecond(1));
 
     rt_thread_init(&cdc_ctrl_thread,
@@ -265,7 +280,7 @@ int cdc_uart_thread_init(void)
                    RT_NULL,
                    &cdc_ctrl_stack[0],
                    sizeof(cdc_ctrl_stack),
-                   CDC_CTRL_THREAD_PRIORITY, 
+                   CDC_CTRL_THREAD_PRIORITY,
                    rt_tick_from_millisecond(1));
 
     rt_thread_init(&cdc_sta_led_thread,
@@ -274,9 +289,9 @@ int cdc_uart_thread_init(void)
                    RT_NULL,
                    &cdc_sta_led_stack[0],
                    sizeof(cdc_sta_led_stack),
-                   CDC_STA_LED_THREAD_PRIORITY, 
+                   CDC_STA_LED_THREAD_PRIORITY,
                    rt_tick_from_millisecond(1));
-    
+
     rt_thread_startup(&cdc_tx_thread);
 
     rt_thread_startup(&cdc_rx_thread);
