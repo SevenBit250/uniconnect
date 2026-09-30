@@ -286,7 +286,10 @@ void USBD_IRQHandler(uint8_t busid)
 
     intflag = USBHS_DEVICE->INT_FG;
 
-    if (intflag & USBHS_TRANSFER_FLAG) {
+    /* 循环处理至无pending事务: IN/OUT双向高并发时, 处理一个事务期间
+     * (含bulk_in链式续发)另一方向的完成事件到达, 单次处理模式下尾部
+     * INT_FG写1清除会把新事件吞掉(该包永远不被提交, 5M丢尾的根因) */
+    while (intflag & USBHS_TRANSFER_FLAG) {
         ep_idx = (USBHS_DEVICE->INT_ST) & MASK_UIS_ENDP;
         token = (((USBHS_DEVICE->INT_ST) & MASK_UIS_TOKEN) >> 4) & 0x03;
 
@@ -403,6 +406,7 @@ void USBD_IRQHandler(uint8_t busid)
                 }
             }
         }
+        intflag = USBHS_DEVICE->INT_FG;   /* 重查: 处理期间新到达的事务 */
     }
 
     if (intflag & USBHS_SETUP_FLAG) {

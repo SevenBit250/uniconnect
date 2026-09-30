@@ -43,7 +43,7 @@ UniConnect：基于 CH32V305CCT6（RISC-V，主频 144MHz）的 CMSIS-DAP 调试
 - **start_write 失败必须回滚 `tx_buffer_empty`**，否则方向 A 永久死锁。满 512 块必须发 ZLP——Windows usbser 只在传输边界完成读取（去掉 ZLP 数据滞留驱动不投递）。
 - **调试设施**：`g_dbg` 全链路计数器（魔法波特率 1234567 经 CDC IN 返回 84B 快照）；`bsp_watchdog` 金丝雀+OUT DMA 指向校验（monitor 线程）；PMP 诱捕代码骨架已验证可用（保护诱饵区可抓 CPU 写者 PC，DMA 写者不触发）。
 - **Windows usbser 主机侧行为**：单笔大写 pending 期间饿死读（测试须分块写+低波特率加 10ms 节奏）；数据完整性与设备无关。
-- **性能边界与残余问题（2026-09-30 实测）**：RX 已是 8KB 循环环形+贪心收割+合并大传输(≤4KB)。≤1.5M 高可靠（多轮 64KB×16 长锤 bit-perfect）；2M+ 偶发丢 512B 整块（概率性，字节总账证明设备 USB 层与主机写入分毫不差——out_bytes=tx_bytes=in_bytes 对账全平，丢失发生在 USB OUT 软件处理窗口，主嫌疑：ch32hs 驱动 PID_OUT 的 TOG_OK 校验丢弃已被硬件 ACK 的包、或 out_done 回调的重复/缺失微窗口）。下一步排查方向：给 PID_OUT 的 TOG_OK 丢弃路径加计数器；用 USBPcap 抓主机侧实际包序；测试脚本改累计流比对（消除应用层 purge 丢尾干扰）。
+- **性能边界（2026-09-30 终测）**：**≤3M 高可靠**（921600/1.5M/2M/3M 全过、混合长锤 11/12、回归 11/11），ISR 循环重查修复把上限从 2M 推到 3M。4M/5M 满速吞吐但恒丢 512B 块（双缓冲/牺牲救回/TOG差分/FS切换四轮实验定位为 **WCH USBHS HS 控制器硅级事件竞态**：FS 模式下整块丢失消失、变为字节级丢失=另一层 RX DMA@5M 的 AHB 挤占 ORE 极限；两者均为硬件层，软件已穷尽）。usbser 写侧全量到达（WriteFile 无短写无异常，分层排除法完整记录于提交历史）。
 - **测试方法论**：Windows usbser 应用层读满即停+下轮 purge 会丢迟到尾巴（测试须累计流比对）；单笔大写饿死读（分块写+低速档 10ms 节奏）；每 512 倍数传输必须 ZLP 否则主机不投递。
 - **子模块异常**：`CherryRB` 在 git index 中是 gitlink 但 `.gitmodules` 无对应条目。
 - USB 时钟：USBPHY 48MHz，PLL 以 HSE 为参考；主频已从早期版本调到 144MHz，勿按旧文档的 132MHz 理解。
