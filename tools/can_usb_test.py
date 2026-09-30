@@ -113,6 +113,15 @@ def main():
         print(f'CH{ch} SET_MODE(loopback): status={d.last_ctrl_rsp[2]}')
         assert d.last_ctrl_rsp[2] == 0
 
+    # 取设备计数基数
+    base = {0: (0, 0), 1: (0, 0)}
+    for ch in (0, 1):
+        d.ctrl(ch, CANC_GET_STATUS)
+        d.pump(0.2)
+        _, cmd, st, pl = d.last_ctrl_rsp
+        tx, rx, err, kbps, mode = struct.unpack('<IIIII', pl[:20])
+        base[ch] = (tx, rx)
+
     # 双路发帧: id=0x100+ch, data=handle序列
     t0 = time.time()
     sent = {0: [], 1: []}
@@ -174,15 +183,16 @@ def main():
     if gaps:
         ok = False
 
-    # 设备计数器对账
+    # 设备计数器对账(累计值, 比对本轮增量)
     for ch in (0, 1):
         d.ctrl(ch, CANC_GET_STATUS)
         d.pump(0.2)
         _, cmd, st, pl = d.last_ctrl_rsp
         tx, rx, err, kbps, mode = struct.unpack('<IIIII', pl[:20])
-        print(f'CH{ch} 设备计数: tx={tx} rx={rx} err={err} bitrate={kbps} mode={mode}')
-        if rx != len(d.rx_frames[ch]):
-            print(f'   ! 设备rx({rx}) != 主机收到({len(d.rx_frames[ch])})')
+        dtx, drx = tx - base[ch][0], rx - base[ch][1]
+        print(f'CH{ch} 设备计数增量: tx={dtx} rx={drx} err={err} bitrate={kbps} mode={mode}')
+        if drx != len(d.rx_frames[ch]):
+            print(f'   ! 设备rx增量({drx}) != 主机收到({len(d.rx_frames[ch])})')
             ok = False
 
     print(f'用时{dt:.1f}s 双路合计{2*nframes}帧')

@@ -214,15 +214,25 @@ static void handle_out_block(const uint8_t *blk, uint16_t len)
 
 /* ---- IN(can->usb)拼装 ---- */
 
-#define RX_BATCH_FRAMES 20   /* 20x20=400B+头=408, 留104B给同块内TXACK/事件包(满块挤丢ACK的根源) */
+#define RX_MAX_RECORDS 25    /* (512-8)/20: 单块满载上限, 背压后实际条数由剩余空间决定 */
 
 static void assemble_rx(uint8_t ch)
 {
-    static __attribute__((aligned(4))) uint8_t stage[RX_BATCH_FRAMES * 20];
+    static __attribute__((aligned(4))) uint8_t stage[RX_MAX_RECORDS * 20];
     uint16_t n = 0;
+    uint16_t maxrec = 0;
     can_frame_t f;
 
-    while (n < RX_BATCH_FRAMES && bsp_can_rx_pop(ch, &f)) {
+    /* 空间预判背压: 当前拼装块剩余空间能装几条才pop几条,
+     * 装不下的帧留在接收环等下一轮 -- in_put_or_drop的整包丢弃
+     * 从此理论上不可达, 真背压点移到接收环满(有计数+事件上报) */
+    if (in_len + 8u + 20u <= CAN_USB_BLOCK_SIZE) {
+        maxrec = (uint16_t)((CAN_USB_BLOCK_SIZE - in_len - 8u) / 20u);
+        if (maxrec > RX_MAX_RECORDS) {
+            maxrec = RX_MAX_RECORDS;
+        }
+    }
+    while (n < maxrec && bsp_can_rx_pop(ch, &f)) {
         uint8_t *rec = &stage[n * 20];
         rec[0] = (uint8_t)f.id;
         rec[1] = (uint8_t)(f.id >> 8);
@@ -245,15 +255,20 @@ static void assemble_rx(uint8_t ch)
     }
 }
 
-#define ACK_BATCH 31   /* 31x4=124B */
+#define ACK_MAX_RECORDS 16  /* ack环深度即上限(stage瘦身, RAM紧张) */
 
 static void assemble_acks(void)
 {
-    static __attribute__((aligned(4))) uint8_t stage[ACK_BATCH * 4];
+    static __attribute__((aligned(4))) uint8_t stage[ACK_MAX_RECORDS * 4];
     uint16_t n = 0;
+    uint16_t maxrec = 0;
     can_ack_t a;
 
-    while (n < ACK_BATCH && bsp_can_ack_pop(&a)) {
+    /* 同assemble_rx: 空间预判, 装不下的留在ack环(队列深度即缓冲) */
+    if (in_len + 8u + 4u <= CAN_USB_BLOCK_SIZE) {
+        maxrec = (uint16_t)((CAN_USB_BLOCK_SIZE - in_len - 8u) / 4u);
+    }
+    while (n < maxrec && bsp_can_ack_pop(&a)) {
         uint8_t *rec = &stage[n * 4];
         rec[0] = (uint8_t)a.handle;
         rec[1] = (uint8_t)(a.handle >> 8);
