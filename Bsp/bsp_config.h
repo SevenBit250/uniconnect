@@ -10,7 +10,7 @@
 #define CDC_INT_EP         0x85
 
 #define USBD_VID           0x0D28
-#define USBD_PID           0x0204
+#define USBD_PID           0x0215
 #define USBD_MAX_POWER     500
 #define USBD_LANGID_STRING 1033
 
@@ -34,7 +34,14 @@
  * 1M波特率满载(~8k帧/s)时ISR占用<2% CPU, 非瓶颈。
  * 引脚: CAN1=PB8/PB9(Remap1, PD0/PD1在48脚封装不存在), CAN2=PB12/PB13(固定) */
 #define CAN_BITRATE_KBPS     1000u  /* 目标波特率(回环自测+未来总线) */
-#define CAN_TX_RING_LEN      32u    /* 每通道发送帧环深度 */
-#define CAN_RX_RING_LEN      32u    /* 每通道接收帧环深度 */
+#define CAN_TX_RING_LEN      28u    /* 每通道发送帧环深度: USB全速灌批时1M波特率清环需2.6ms/20帧, 16深溢出(实测每20帧丢2) */
+#define CAN_RX_RING_LEN      16u    /* 每通道接收帧环深度 */
+
+/* CAN桥USB接口(WinUSB厂商bulk, 单接口双路复用) */
+#define CAN_IF_IN_EP         0x83
+#define CAN_IF_OUT_EP        0x06
+#define CAN_USB_BLOCK_SIZE   512u   /* = USB HS bulk MPS */
+#define CAN_USB_OUT_BLOCKS   4u     /* OUT(usb->can)块池深 */
+#define CAN_USB_IN_BLOCKS    2u     /* IN(can->usb)拼装块: 在途1+拼装1轮转 */
 
 #endif

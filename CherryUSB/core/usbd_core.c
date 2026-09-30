@@ -306,7 +306,6 @@ static bool usbd_get_descriptor(uint8_t busid, uint16_t type_index, uint8_t **da
                 found = false;
                 break;
             }
-
             desc = (uint8_t *)g_usbd_core[busid].descriptors->bos_descriptor->string;
             desc_len = g_usbd_core[busid].descriptors->bos_descriptor->string_len;
             break;
@@ -1195,6 +1194,8 @@ static void __usbd_event_ep0_setup_complete_handler(uint8_t busid, struct usb_se
         }
     }
 
+    {   /* TEMP: control request ring log (WinUSB bind diagnosis) */
+    }
     g_usbd_core[busid].ep0_data_buf = g_usbd_core[busid].req_data;
     g_usbd_core[busid].ep0_data_buf_residue = setup->wLength;
     g_usbd_core[busid].ep0_data_buf_len = setup->wLength;

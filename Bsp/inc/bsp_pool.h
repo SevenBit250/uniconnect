@@ -116,6 +116,7 @@ typedef struct {
     uint32_t can2_err;
     uint32_t can_rx_drop;        // RX环满丢帧
     uint32_t can_tx_full;        // TX环满拒发
+    uint32_t can_ack_drop;       // TX回执环满丢回执
 } bsp_dbg_t;
 
 extern bsp_dbg_t g_dbg;

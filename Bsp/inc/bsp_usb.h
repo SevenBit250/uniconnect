@@ -31,6 +31,29 @@ typedef struct {
     void(*dap_event_hander_callback)(uint8_t busid, uint8_t event);
 } bsp_usb_dap_buffer_t;
 
+/* CAN桥USB接口: OUT(usb->can)块缓冲池 + IN(can->usb)拼装块池
+ * 协议逻辑在App/can_bridge_thread.c, 本层只做端点/池搬运(镜像CDC模式) */
+typedef struct {
+    bsp_pool_t out_pool;                          // CAN OUT块缓冲池
+    struct rt_semaphore data_ready_sem;           // OUT块就绪
+    struct usbd_endpoint in_ep;
+    struct usbd_endpoint out_ep;
+} bsp_usb_can_buffer_t;
+
+extern bsp_usb_can_buffer_t canusb_handle;
+
+int bsp_can_usb_ep_start_write(uint8_t busid, const uint8_t *data, uint32_t data_len);
+int bsp_can_usb_get_mps(void);
+
+/* OUT块消费接口(块首恒4字节对齐, 用完recycle) */
+uint8_t bsp_can_usb_rx_pop(uint8_t **block, uint16_t *len);
+void bsp_can_usb_rx_recycle(uint8_t *block);
+void bsp_can_usb_rx_try_resume(void);
+/* 重建OUT池并重挂端点(CONFIGURED/总线复位时调用) */
+void bsp_can_usb_rx_reset(void);
+/* 开启CAN桥端点(CONFIGURED事件) */
+void bsp_can_usb_ep_open(void);
+
 int bsp_usb_cdc_ep_start_write(uint8_t busid, const uint8_t *data, uint32_t data_len);
 
 /* CDC bulk MPS(512), 供ZLP等判断 */

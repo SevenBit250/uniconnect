@@ -286,6 +286,11 @@ void USBD_IRQHandler(uint8_t busid)
 
     intflag = USBHS_DEVICE->INT_FG;
 
+    /* 全标志闭环处理: PFIC对"ISR运行期间置位"的标志不会可靠重触发(5M丢块
+     * 已证TRANSFER如此), SETUP同理 -- 外层重查堵住transfer循环尾读INT_FG后
+     * 才到达的SETUP, 否则该SETUP永远无人处理, usbccgp的SET_CONFIGURATION
+     * 超时(实测4s), 复合设备以STATUS_NO_SUCH_DEVICE启动失败(WinUSB绑定之障) */
+    do {
     /* TRANSFER标志保留至循环体末尾(端点重武装之后)才清除:
      * RM RB_UC_INT_BUSY(CTRL bit3)语义为标志置位期间SIE自动NAK所有新事务,
      * 若在入口提前清除, 处理当前包期间到达的下一个OUT包会被ACK进尚未换出的
@@ -299,17 +304,24 @@ void USBD_IRQHandler(uint8_t busid)
         if (token == PID_IN) {
             USB_SET_TX_CTRL(ep_idx, (USB_GET_TX_CTRL(ep_idx) & ~(USBHS_EP_T_RES_MASK | USBHS_EP_T_TOG_MASK)) | USBHS_EP_T_RES_NAK | USBHS_EP_T_TOG_0);
             if (ep_idx == 0x00) {
+                /* EP0多包IN: 完成回调必须传"本包"字节数而非累计值 --
+                 * 核心层按nbytes递减residue并前移缓冲, 传累计值会使第2包后
+                 * residue下溢/指针错位, 第3包起发出错位数据(>128B控制IN全灭,
+                 * 如MSOS2.0描述符集166B; <=2包侥幸无害故此前未暴露) */
+                uint32_t pkt_bytes;
                 if (g_ch32_usbhs_udc.in_ep[ep_idx].xfer_len >= g_ch32_usbhs_udc.in_ep[ep_idx].ep_mps) {
+                    pkt_bytes = g_ch32_usbhs_udc.in_ep[ep_idx].ep_mps;
                     g_ch32_usbhs_udc.in_ep[ep_idx].xfer_len -= g_ch32_usbhs_udc.in_ep[ep_idx].ep_mps;
                     g_ch32_usbhs_udc.in_ep[ep_idx].actual_xfer_len += g_ch32_usbhs_udc.in_ep[ep_idx].ep_mps;
                     ep0_tx_data_toggle ^= 1;
                 } else {
+                    pkt_bytes = g_ch32_usbhs_udc.in_ep[ep_idx].xfer_len;
                     g_ch32_usbhs_udc.in_ep[ep_idx].actual_xfer_len += g_ch32_usbhs_udc.in_ep[ep_idx].xfer_len;
                     g_ch32_usbhs_udc.in_ep[ep_idx].xfer_len = 0;
                     ep0_tx_data_toggle = true;
                 }
 
-                usbd_event_ep_in_complete_handler(0, ep_idx | 0x80, g_ch32_usbhs_udc.in_ep[ep_idx].actual_xfer_len);
+                usbd_event_ep_in_complete_handler(0, ep_idx | 0x80, pkt_bytes);
 
                 if (g_ch32_usbhs_udc.dev_addr > 0) {
                     USBHS_DEVICE->DEV_AD = g_ch32_usbhs_udc.dev_addr & 0xff;
@@ -399,7 +411,9 @@ void USBD_IRQHandler(uint8_t busid)
                     g_ch32_usbhs_udc.out_ep[ep_idx].xfer_len -= read_count;
 
                     if ((read_count < g_ch32_usbhs_udc.out_ep[ep_idx].ep_mps) || (g_ch32_usbhs_udc.out_ep[ep_idx].xfer_len == 0)) {
-                        usbd_event_ep_out_complete_handler(0, ep_idx, g_ch32_usbhs_udc.out_ep[ep_idx].actual_xfer_len);
+                        /* 完成回调传"本次"字节数而非累计值: 多包传输时累计值会让
+                         * 消费者把块长记成滚雪球的错值(CAN OUT池曾录得771B的根源) */
+                        usbd_event_ep_out_complete_handler(0, ep_idx, read_count);
                     } else {
                         USB_SET_RX_DMA(ep_idx, (uint32_t)g_ch32_usbhs_udc.out_ep[ep_idx].xfer_buf);
                         USB_SET_RX_CTRL(ep_idx, (USB_GET_RX_CTRL(ep_idx) & ~USBHS_EP_R_RES_MASK) | USBHS_EP_R_RES_ACK);
@@ -407,16 +421,17 @@ void USBD_IRQHandler(uint8_t busid)
                 }
             }
         }
-        /* 端点重武装已完成, 现在清除标志放行下一事务(INT_BUSY auto-NAK解除),
-         * 后续OUT包将落入新RX缓冲, 不会覆写本循环体刚消费的数据 */
+        /* 端点重武装完成后才清标志(INT_BUSY保护ISR全程), 循环重查新事务 */
         USBHS_DEVICE->INT_FG = USBHS_TRANSFER_FLAG;
-        intflag = USBHS_DEVICE->INT_FG;   /* 重查: 清除后立即到达的事务 */
+        intflag = USBHS_DEVICE->INT_FG;
     }
 
     if (intflag & USBHS_SETUP_FLAG) {
         USBHS_DEVICE->INT_FG = USBHS_SETUP_FLAG;
         usbd_event_ep0_setup_complete_handler(0, (uint8_t *)&g_ch32_usbhs_udc.setup);
     }
+    intflag = USBHS_DEVICE->INT_FG;   /* 尾部重查: 循环尾读后才到的标志不再漏 */
+    } while (intflag & (USBHS_TRANSFER_FLAG | USBHS_SETUP_FLAG));
 
     if (intflag & USBHS_DETECT_FLAG) {
         USBHS_DEVICE->INT_FG = USBHS_DETECT_FLAG;
