@@ -5,8 +5,9 @@ UniConnect：基于 CH32V305CCT6（RISC-V，主频 144MHz）的 CMSIS-DAP 调试
 ## 构建与调试
 
 - IDE 为 MounRiver Studio (MRS) 2.3.0（Eclipse CDT 托管构建），项目配置在 `.project` / `.cproject`，勿手改 `obj/` 下自动生成的 makefile。
-- 命令行构建：`cd obj && make`（前提是 IDE 已生成 makefile）。产物为 `obj/uniconnect.elf`。
-- 不依赖 IDE 的本地构建：工具链在 `C:\MounRiver\MounRiver_Studio2\resources\app\resources\win32\components\WCH\Toolchain\RISC-V Embedded GCC\bin`，make 在同目录树的 `...\win32\others\Build_Tools\Make\bin`。仓库被移动后 `obj/**/*.{mk,d}` 里的绝对路径需 sed 修正（obj 未被 git 跟踪）。
+- 命令行构建（推荐）：仓库根 `bash gen_makefile.sh` 一次性生成 `obj/GNUmakefile`（继承 MRS makefile + 工具链 PATH 注入 + build/ 产物收集）和根 `Makefile` 转发层，之后根目录直接 `make`（产物 elf/bin/hex/map 收集到 `build/`）、`make flash`（openocd + wch-link 烧录）、`make clean`。make 本体不在 PATH 时先 `export PATH="/c/MounRiver/MounRiver_Studio2/resources/app/resources/win32/others/Build_Tools/Make/bin:$PATH"`。
+- 直接用 MRS 原始 makefile：`cd obj && make all`（必须 `make all`，裸 `make` 行为不对；工具链需自行注入 PATH）。
+- 不依赖 IDE 的本地构建：工具链在 `C:\MounRiver\MounRiver_Studio2\resources\app\resources\win32\components\WCH\Toolchain\RISC-V Embedded GCC\bin`，make 在同目录树的 `...\win32\others\Build_Tools\Make\bin`，openocd 及 `wch-riscv.cfg` 在 `...\win32\components\WCH\OpenOCD\OpenOCD\bin`。仓库被移动后重跑 `gen_makefile.sh` 即自愈 GNUmakefile 里的 Link.ld 绝对路径（`obj/**/*.d` 里的绝对路径仍会重新生成）。
 - 官方 EVT 例程参考：`C:\Users\25293\Desktop\aiworkspace\CH32V307EVT\EVT\EXAM`（USBHS 双缓冲/CDC 例程展示了官方推荐的落块模式）。
 - 工具链：RISC-V Cross GCC，`-Os`，架构 RV32IMA + C（压缩指令）。
 - 烧录/调试配置：`uniconnect.launch`（OpenOCD/wch-link）。
@@ -28,6 +29,8 @@ UniConnect：基于 CH32V305CCT6（RISC-V，主频 144MHz）的 CMSIS-DAP 调试
 `Startup → SystemInit() → main()（空循环）→ rtthread_startup() → INIT_APP_EXPORT(app_entry) → 各线程启动`
 
 ## 已知坑
+
+- **Windows 原生 make 的 `$(PATH)` 恒为分号形式**：Git Bash 启动原生 make.exe 时 MSYS 会把 PATH 环境变量自动转成 `C:\...;C:\...` 形式，makefile 里 `export PATH := /c/xxx:$(PATH)` 会拼出冒号+分号混合的废 PATH（bundled sh 报工具 not found，且 `/c/` 挂载形式它也不认）。正确做法见 `gen_makefile.sh` 生成的 GNUmakefile：路径用 `C:/` 正斜杠形式 + `$(findstring ;,$(PATH))` 探测分隔符再拼接。
 
 - **[致命] CH32V30x DMA Normal 模式 CNTR=0 静止态狂奔**：块满 TC 后通道处于 EN=1/CNTR=0，该系列（与 STM32 不同！）此时若外设请求挂起会以 65536 计数从旧地址连续狂读/狂写 RAM（已实测涂烂 34KB bss）。对策：RX 用 **CIRCULAR 模式乒乓双块**（DMA 永不停转）；TX 用 **DMAT 门控**（TC4 ISR 第一时间关 DMAT+EN，TC4 中断设为最高抢占优先级 0）。新接任何 DMA 通道必须遵循这两种模式之一。
 - **[致命] HPE 硬件栈在高密度中断下弹出错位**（黑匣子实锤：保存的 mstatus 值 0x7800 被恢复进 pc/ra → mcause=2 野跳转）。已在启动代码 `csrw 0x804, 0x3f` 关闭 HPE 硬件栈（bit5），fast 属性处理器兼容。

@@ -53,3 +53,6 @@ dkms.conf
 
 sample
 obj
+
+# gen_makefile.sh 产物收集目录
+/build/
