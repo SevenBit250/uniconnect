@@ -153,6 +153,24 @@ void bsp_can_usb_ep_open(void)
     usbd_ep_open(0, &can_ep_in_desc);
 }
 
+/* DAP端点描述符(厂商bulk接口无类驱动, 自备; wMaxPacketSize=DAP_PACKET_SIZE=512) */
+static struct usb_endpoint_descriptor dap_ep_out_desc = {
+    .bLength = 0x07,
+    .bDescriptorType = USB_DESCRIPTOR_TYPE_ENDPOINT,
+    .bEndpointAddress = DAP_OUT_EP,
+    .bmAttributes = USB_ENDPOINT_TYPE_BULK,
+    .wMaxPacketSize = DAP_USB_PACKET_SIZE,
+    .bInterval = 0,
+};
+static struct usb_endpoint_descriptor dap_ep_in_desc = {
+    .bLength = 0x07,
+    .bDescriptorType = USB_DESCRIPTOR_TYPE_ENDPOINT,
+    .bEndpointAddress = DAP_IN_EP,
+    .bmAttributes = USB_ENDPOINT_TYPE_BULK,
+    .wMaxPacketSize = DAP_USB_PACKET_SIZE,
+    .bInterval = 0,
+};
+
 static void bsp_can_usb_out_done(uint16_t nbytes)
 {
     if (nbytes == 0) {
@@ -260,11 +278,12 @@ bsp_usb_dap_buffer_t dap_handle;
 
 /*!< config descriptor size */
 #define VENDOR_CAN_IF_DESC_SIZE (9 + 7 + 7)
+#define VENDOR_DAP_IF_DESC_SIZE (9 + 7 + 7)   /* DAP bulk v2: 接口+双bulk端点 */
 #define CANUSB_SOLO_TEST 0   /* 复合模式=产品配置: CDC+CAN双接口 */
 #if CANUSB_SOLO_TEST
 #define USB_CONFIG_SIZE (9 + VENDOR_CAN_IF_DESC_SIZE)
 #else
-#define USB_CONFIG_SIZE (9 + CDC_ACM_DESCRIPTOR_LEN + VENDOR_CAN_IF_DESC_SIZE)
+#define USB_CONFIG_SIZE (9 + CDC_ACM_DESCRIPTOR_LEN + VENDOR_CAN_IF_DESC_SIZE + VENDOR_DAP_IF_DESC_SIZE)
 #endif
 
 static const uint8_t device_descriptor[] = {
@@ -276,11 +295,19 @@ static const uint8_t config_descriptor[] = {
     USB_CONFIG_DESCRIPTOR_INIT (USB_CONFIG_SIZE, 0x01, 0x01, USB_CONFIG_BUS_POWERED, USBD_MAX_POWER),
     0x09, 0x04, 0x00, 0x00, 0x02, 0xFF, 0x00, 0x00, 0x00,
 #else
-    USB_CONFIG_DESCRIPTOR_INIT (USB_CONFIG_SIZE, 0x03, 0x01, USB_CONFIG_BUS_POWERED, USBD_MAX_POWER),
+    USB_CONFIG_DESCRIPTOR_INIT (USB_CONFIG_SIZE, 0x04, 0x01, USB_CONFIG_BUS_POWERED, USBD_MAX_POWER),
     CDC_ACM_DESCRIPTOR_INIT (0x00, CDC_INT_EP, CDC_OUT_EP, CDC_IN_EP, CDC_MAX_MPS, 0x02)
     ,
-    0x09, 0x04, 0x02, 0x00, 0x02, 0xFF, 0x00, 0x00, 0x02,
 #endif
+    /* DAP bulk v2(intf 2): 必须排在CAN前面 -- OpenOCD/pyOCD取第一个厂商bulk
+     * 接口, 曾因CAN在前被抢走(DAP_Info发给了CAN桥)。接口字符串必须是
+     * "CMSIS-DAP"(严格匹配的工具靠它识别v2, 规范2.1)。wMaxPacketSize=
+     * 512=0x0200=DAP_USB_PACKET_SIZE(HS WinUSB) */
+    0x09, 0x04, 0x02, 0x00, 0x02, 0xFF, 0x00, 0x00, 0x04,
+    0x07, 0x05, DAP_OUT_EP, 0x02, 0x00, 0x02, 0x00,
+    0x07, 0x05, DAP_IN_EP, 0x02, 0x00, 0x02, 0x00,
+    /* CAN桥(intf 3) */
+    0x09, 0x04, 0x03, 0x00, 0x02, 0xFF, 0x00, 0x00, 0x05,
     0x07, 0x05, CAN_IF_OUT_EP, 0x02, 0x00, 0x02, 0x00,
     0x07, 0x05, CAN_IF_IN_EP, 0x02, 0x00, 0x02, 0x00,
 };
@@ -290,7 +317,7 @@ static const uint8_t config_descriptor[] = {
  * 0x08=厂商版本)。曾误用0x06/0x08: Windows按ModelID解析10B头但该类型固定22B,
  * 长度不符整集判废, 枚举在BOS后中止(usbccgp报STATUS_NO_SUCH_DEVICE)。 */
 static const uint8_t msosv2_descriptor_set[] = {
-    0x0A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x06, 0xAA, 0x00, 0x08, 0x00,
+    0x0A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x06, 0x4A, 0x01, 0x08, 0x00,
     0x02, 0x00, 0x02, 0x00, 0xA0, 0x00, 0x14, 0x00, 0x03, 0x00, 0x57, 0x49,
     0x4E, 0x55, 0x53, 0x42, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x84, 0x00, 0x04, 0x00, 0x07, 0x00, 0x2A, 0x00, 0x44, 0x00,
@@ -305,13 +332,31 @@ static const uint8_t msosv2_descriptor_set[] = {
     0x43, 0x00, 0x42, 0x00, 0x39, 0x00, 0x43, 0x00, 0x35, 0x00, 0x41, 0x00,
     0x41, 0x00, 0x33, 0x00, 0x42, 0x00, 0x39, 0x00, 0x7D, 0x00, 0x00, 0x00,
     0x00, 0x00,
+    /* 功能子集2: DAP bulk接口(intf 3)同样绑WinUSB+GUID(330B=集合头10+子集160x2) */
+    0x08, 0x00, 0x02, 0x00, 0x03, 0x00, 0xA0, 0x00,
+    0x14, 0x00, 0x03, 0x00, 0x57, 0x49, 0x4E, 0x55, 0x53, 0x42, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x84, 0x00, 0x04, 0x00,
+    0x07, 0x00, 0x2A, 0x00, 0x44, 0x00, 0x65, 0x00, 0x76, 0x00, 0x69, 0x00,
+    0x63, 0x00, 0x65, 0x00, 0x49, 0x00, 0x6E, 0x00, 0x74, 0x00, 0x65, 0x00,
+    0x72, 0x00, 0x66, 0x00, 0x61, 0x00, 0x63, 0x00, 0x65, 0x00, 0x47, 0x00,
+    0x55, 0x00, 0x49, 0x00, 0x44, 0x00, 0x73, 0x00, 0x00, 0x00, 0x50, 0x00,
+    0x7B, 0x00, 0x39, 0x00, 0x32, 0x00, 0x43, 0x00, 0x45, 0x00, 0x36, 0x00,
+    0x34, 0x00, 0x36, 0x00, 0x32, 0x00, 0x2D, 0x00, 0x39, 0x00, 0x43, 0x00,
+    0x37, 0x00, 0x37, 0x00, 0x2D, 0x00, 0x34, 0x00, 0x36, 0x00, 0x46, 0x00,
+    0x45, 0x00, 0x2D, 0x00, 0x39, 0x00, 0x33, 0x00, 0x33, 0x00, 0x42, 0x00,
+    0x2D, 0x00, 0x33, 0x00, 0x31, 0x00, 0x43, 0x00, 0x42, 0x00, 0x39, 0x00,
+    0x43, 0x00, 0x35, 0x00, 0x41, 0x00, 0x41, 0x00, 0x33, 0x00, 0x42, 0x00,
+    0x39, 0x00, 0x7D, 0x00, 0x00, 0x00, 0x00, 0x00,
 };
 
-/* BOS(33B): MS OS 2.0平台能力, vendor code 0x20 */
+/* BOS(33B): MS OS 2.0平台能力, vendor code 0x20。
+ * 倒数第4-3字节是 wMSOSDescriptorSetTotalLength, 必须与描述符集内部
+ * wTotalLength 严格一致(同一长度两处各存一份, 改集合长度必须两处同改,
+ * 不一致Windows直接判废→父设备Error无子接口, 曾漏改踩坑) */
 static const uint8_t bos_descriptor[] = {
     0x05, 0x0F, 0x21, 0x00, 0x01, 0x1C, 0x10, 0x05, 0x00, 0xDF, 0x60, 0xDD,
     0xD8, 0x89, 0x45, 0xC7, 0x4C, 0x9C, 0xD2, 0x65, 0x9D, 0x9E, 0x64, 0x8A,
-    0x9F, 0x00, 0x00, 0x03, 0x06, 0xAA, 0x00, 0x20, 0x00,
+    0x9F, 0x00, 0x00, 0x03, 0x06, 0x4A, 0x01, 0x20, 0x00,
 };
 
 static struct usb_msosv2_descriptor msosv2_desc = {
@@ -342,7 +387,9 @@ static const char *string_descriptors[] = {
     (const char[]){0x09, 0x04}, /* Langid */
     "UniConnect", /* Manufacturer */
     "UniConnect CMSIS-DAP Bridge", /* Product */
-    "UNICONNECT-18", /* Serial Number: 变更可触发Windows全新安装(重跑MSOS2.0绑定) */
+    "UNICONNECT-19", /* Serial Number: 变更可触发Windows全新安装(重跑MSOS2.0绑定) */
+    "CMSIS-DAP", /* 接口字符串: bulk v2识别标志(OpenOCD/pyOCD按此匹配, 规范2.1) */
+    "UniConnect CAN Bridge", /* CAN桥接口字符串: 与DAP区分, 防止工具误认 */
 };
 
 static const uint8_t *device_descriptor_callback (uint8_t speed) {
@@ -358,7 +405,7 @@ static const uint8_t *device_quality_descriptor_callback (uint8_t speed) {
 }
 
 static const char *string_descriptor_callback (uint8_t speed, uint8_t index) {
-    if (index > 3) {
+    if (index > 5) {
         return NULL;
     }
     return string_descriptors[index];
@@ -384,6 +431,11 @@ static void usbd_event_handler (uint8_t busid, uint8_t event) {
 #endif
         bsp_can_usb_ep_open();
         bsp_can_usb_rx_reset();
+        /* DAP: 开端点后交App挂首包(命令泵 USB_Request[0]) */
+        usbd_ep_open(0, &dap_ep_out_desc);
+        usbd_ep_open(0, &dap_ep_in_desc);
+        extern void dap_event_handler(uint8_t busid, uint8_t event);
+        dap_event_handler(0, USBD_EVENT_CONFIGURED);
     }
     /* cdc callback */
     if (cdc_handle.cdc_event_hander_callback) {
@@ -398,11 +450,13 @@ static int bsp_usb_env_init(void)
     bsp_pool_init(&cdc_handle.rx_out_pool, cdc_out_pool_storage, USB_CDC_OUT_BLOCK_SIZE, USB_CDC_OUT_BLOCK_COUNT);
     rt_sem_init(&canusb_handle.data_ready_sem, "can_rx", 0, RT_IPC_FLAG_FIFO);
     bsp_pool_init(&canusb_handle.out_pool, canusb_out_pool_storage, CAN_USB_BLOCK_SIZE, CAN_USB_OUT_BLOCKS);
+    rt_sem_init(&dap_handle.request_sem, "dap_rx", 0, RT_IPC_FLAG_FIFO);
     return 0;
 }
 INIT_COMPONENT_EXPORT(bsp_usb_env_init);
 
 static struct usbd_interface can_vendor_intf;
+static struct usbd_interface dap_vendor_intf;
 
 static int bsp_usb_init(void)
 {
@@ -413,8 +467,10 @@ static int bsp_usb_init(void)
     usbd_add_interface (0, &can_vendor_intf);
 #else
     /* 复合: 注册顺序决定intf_num, 必须与描述符一致 -- CDC先注册拿0/1,
-     * CAN后注册拿2(SOLO实验时CAN曾前置抢0号, Windows给CDC接口0的类请求
-     * 被路由到无处理器的CAN接口→STALL→usbser打开报错31的根因) */
+     * DAP再注册拿2(必须先于CAN: OpenOCD取第一个厂商bulk接口, CAN在前会
+     * 抢走导致DAP_Info发给CAN桥), CAN最后拿3(SOLO实验时CAN曾前置抢0号,
+     * Windows给CDC接口0的类请求被路由到无处理器的CAN接口→STALL→usbser
+     * 打开报错31的根因) */
     cdc_handle.in_ep.ep_addr = CDC_IN_EP;
     cdc_handle.out_ep.ep_addr = CDC_OUT_EP;
     cdc_handle.out_ep.ep_cb = bsp_usb_cdc_bulk_out;
@@ -422,9 +478,22 @@ static int bsp_usb_init(void)
     usbd_add_interface (0, usbd_cdc_acm_init_intf (0, &cdc_intf1));
     usbd_add_endpoint (0, &cdc_handle.out_ep);
     usbd_add_endpoint (0, &cdc_handle.in_ep);
+    memset(&dap_vendor_intf, 0, sizeof(dap_vendor_intf));
+    usbd_add_interface (0, &dap_vendor_intf);
+#endif
     memset(&can_vendor_intf, 0, sizeof(can_vendor_intf));
     usbd_add_interface (0, &can_vendor_intf);
-#endif
+    /* DAP端点注册(命令泵回调直连App) */
+    {
+        extern void dap_acm_bulk_out(uint8_t busid, uint8_t ep, uint32_t nbytes);
+        extern void dap_acm_bulk_in(uint8_t busid, uint8_t ep, uint32_t nbytes);
+        dap_handle.out_ep.ep_addr = DAP_OUT_EP;
+        dap_handle.out_ep.ep_cb = dap_acm_bulk_out;
+        dap_handle.in_ep.ep_addr = DAP_IN_EP;
+        dap_handle.in_ep.ep_cb = dap_acm_bulk_in;
+        usbd_add_endpoint (0, &dap_handle.out_ep);
+        usbd_add_endpoint (0, &dap_handle.in_ep);
+    }
     canusb_handle.in_ep.ep_addr = CAN_IF_IN_EP;
     canusb_handle.out_ep.ep_addr = CAN_IF_OUT_EP;
     canusb_handle.out_ep.ep_cb = bsp_can_usb_bulk_out;

@@ -18,6 +18,10 @@
 
 extern bsp_usb_dap_buffer_t dap_handle;
 
+/* DAP链路观测计数器(openocd mdw读取): [0]CONFIGURED次数 [1]OUT回调次数
+ * [2]最近一次arm返回值 [3]ISR内EP2 OUT事务次数(在usb_dc_usbhs.c递增) */
+volatile uint32_t g_dap_dbg[4];
+
 static volatile uint16_t USB_RequestIndexI = 0; // Request  Index In
 static volatile uint16_t USB_RequestIndexO = 0; // Request  Index Out
 static volatile uint16_t USB_RequestCountI = 0; // Request  Count In
@@ -54,16 +58,18 @@ void dap_event_handler(uint8_t busid, uint8_t event)
             break;
         case USBD_EVENT_CONFIGURED:
             USB_RequestIdle = 0;
-            usbd_ep_start_read(0, DAP_OUT_EP, USB_Request[0], DAP_PACKET_SIZE);
+            g_dap_dbg[0]++;
+            g_dap_dbg[2] = (uint32_t)usbd_ep_start_read(0, DAP_OUT_EP, USB_Request[0], DAP_PACKET_SIZE);
             break;
         default:
             break;
     }
 }
 
-void dap_acm_bulk_out (uint8_t busid, uint8_t ep, uint32_t nbytes) 
+void dap_acm_bulk_out (uint8_t busid, uint8_t ep, uint32_t nbytes)
 {
     (void) busid;
+    g_dap_dbg[1]++;
     if (USB_Request[USB_RequestIndexI][0] == ID_DAP_TransferAbort) {
         DAP_TransferAbort = 1U;
     } else {

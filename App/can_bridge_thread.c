@@ -146,12 +146,20 @@ static void handle_ctrl(uint8_t ch, const uint8_t *payload, uint16_t plen)
             status = 0xFF;
             break;
         }
-        uint32_t *w = (uint32_t *)&rsp[2];
-        w[0] = (ch == CAN_CH1) ? g_dbg.can1_tx : g_dbg.can2_tx;
-        w[1] = (ch == CAN_CH1) ? g_dbg.can1_rx : g_dbg.can2_rx;
-        w[2] = (ch == CAN_CH1) ? g_dbg.can1_err : g_dbg.can2_err;
-        w[3] = bsp_can_get_bitrate(ch);
-        w[4] = bsp_can_get_mode(ch);
+        /* 逐字节装配: 曾用uint32_t*直写rsp[2]起(栈上偏移2, 天然2-mod-4未对齐),
+         * 栈布局漂移后触发对齐陷阱HardFault杀死桥线程(昨日布局碰巧无害故未暴露) */
+        uint32_t vals[5];
+        vals[0] = (ch == CAN_CH1) ? g_dbg.can1_tx : g_dbg.can2_tx;
+        vals[1] = (ch == CAN_CH1) ? g_dbg.can1_rx : g_dbg.can2_rx;
+        vals[2] = (ch == CAN_CH1) ? g_dbg.can1_err : g_dbg.can2_err;
+        vals[3] = bsp_can_get_bitrate(ch);
+        vals[4] = bsp_can_get_mode(ch);
+        for (uint32_t k = 0; k < 5; k++) {
+            rsp[2 + 4 * k] = (uint8_t)vals[k];
+            rsp[3 + 4 * k] = (uint8_t)(vals[k] >> 8);
+            rsp[4 + 4 * k] = (uint8_t)(vals[k] >> 16);
+            rsp[5 + 4 * k] = (uint8_t)(vals[k] >> 24);
+        }
         rsp_len = 2 + 20;
         break;
     }

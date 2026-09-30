@@ -194,8 +194,14 @@ SECTIONS
 		PROVIDE( _ebss = .);
 	} >RAM AT>FLASH
 
-	PROVIDE( _end = _ebss);
-	PROVIDE( end = . );
+PROVIDE( _end = _ebss);
+PROVIDE( end = . );
+
+/* 调试基建保留区机械防回退: 0xE000起为PMP诱饵区(2KB)/金丝雀(0xE800)/
+ * 崩溃黑匣子(0xF000), 均为固定地址裸访问, .bss增长侵入=DAP/CAN运行时
+ * 队列写入涂改金丝雀触发看门狗处决(2026-10-01实锤, DAP_PACKET_COUNT
+ * 因此8->2)。需要更多RAM时先挪基建地址再改这里, 不要静默越界 */
+ASSERT(_ebss < 0x2000E000, "bss侵入调试保留区(诱饵/金丝雀/黑匣子)")
 
     .stack ORIGIN(RAM) + LENGTH(RAM) - __stack_size :
     {

@@ -391,6 +391,10 @@ void USBD_IRQHandler(uint8_t busid)
                     ep0_rx_data_toggle ^= 1;
                 }
             } else {
+                if (ep_idx == 0x02) {
+                    extern volatile uint32_t g_dap_dbg[4];
+                    g_dap_dbg[3]++;   /* EP2(DAP OUT)事务到达ISR计数 */
+                }
                 if (!(int_st & USBHS_DEV_UIS_TOG_OK)) {
                     extern volatile uint32_t g_out_tog_drop;
                     g_out_tog_drop++;   /* TOG_OK失败被丢弃的包(已ACK, 数据黑洞) */

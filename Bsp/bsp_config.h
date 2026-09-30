@@ -14,6 +14,10 @@
 #define USBD_MAX_POWER     500
 #define USBD_LANGID_STRING 1033
 
+/* DAP bulk端点MPS: 必须与 Dap/DAP_config.h 的 DAP_PACKET_SIZE 保持一致
+ * (dap_thread按该值收发, 端点描述符按本值武装) */
+#define DAP_USB_PACKET_SIZE 512u
+
 /*!< mps usbfs: 64 */
 #define CDC_MAX_MPS 512u
 

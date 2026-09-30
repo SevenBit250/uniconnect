@@ -99,7 +99,10 @@ This information includes:
 /// This configuration settings is used to optimize the communication performance with the
 /// debugger and depends on the USB peripheral. For devices with limited RAM or USB buffer the
 /// setting can be reduced (valid range is 1 .. 255).
-#define DAP_PACKET_COUNT        8U              ///< Specifies number of packets buffered.
+/* 8->2: 双缓冲8KB曾把.bss顶到0xF724, 埋掉调试基建(PMP诱饵/金丝雀/黑匣子,
+ * 0xD000-0xF040), DAP一活队列写入就越界触发看门狗处决(CAN桥陪葬首例)。
+ * Link.ld已加ASSERT(_ebss<0x2000E000)机械防回退; 性能优化腾出内存后再加回 */
+#define DAP_PACKET_COUNT        2U              ///< Specifies number of packets buffered.
 
 /// Indicate that UART Serial Wire Output (SWO) trace is available.
 /// This information is returned by the command \ref DAP_Info as part of <b>Capabilities</b>.

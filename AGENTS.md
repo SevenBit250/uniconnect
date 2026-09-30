@@ -1,6 +1,6 @@
 # AGENTS.md
 
-UniConnect：基于 CH32V305CCT6（RISC-V，主频 144MHz）的 CMSIS-DAP 调试探针固件，目标功能为 SWD 调试 + CDC 虚拟串口 + 双路 CAN。运行 RT-Thread Nano。当前状态：CDC↔UART 与 CAN-USB 桥已落地并真机回归 PASS，MS OS 2.0 免驱已修通；DAP/SWD 进行中。
+UniConnect：基于 CH32V305CCT6（RISC-V，主频 144MHz）的 CMSIS-DAP 调试探针固件，目标功能为 SWD 调试 + CDC 虚拟串口 + 双路 CAN。运行 RT-Thread Nano。当前状态：CDC↔UART、CAN-USB 桥、DAP bulk v2 通路（OpenOCD 可读 link 信息）均已落地并真机回归，MS OS 2.0 免驱已修通；SWD 目标板联调未开始。
 
 ## 构建与调试
 
@@ -49,6 +49,12 @@ UniConnect：基于 CH32V305CCT6（RISC-V，主频 144MHz）的 CMSIS-DAP 调试
 - **子模块异常**：`CherryRB` 在 git index 中是 gitlink 但 `.gitmodules` 无对应条目。
 - USB 时钟：USBPHY 48MHz，PLL 以 HSE 为参考；主频已从早期版本调到 144MHz，勿按旧文档的 132MHz 理解。
 - **USBHS 真实基址是 0x40023400（非 0x40022000！）**：watchdog 曾用错基址读 UEP4_RX_DMA 得垃圾值，复合模式 CDC 武装后必误杀芯片（表现：设备整个从总线消失）。EP4_RX_DMA = base+0x2C。
+- **MS OS 2.0 描述符集长度账三处同步（2026-10-01 扩双子集再踩两坑）**：同一总长度存在**集合头 wTotalLength 与 BOS 平台能力 wMSOSDescriptorSetTotalLength 两份**，改一处漏一处 → Windows 判废 → 父设备 Error 无子接口（实例 ID 无序列号是其签名）；另手抄第二功能子集曾丢 2 字节（GUID 尾部 'AA' 丢一 A，实际 328≠声明 330）。**改 MSOS 集合必须跑 `python tools/msos_validate.py`**（机械校验平铺/长度同步/类型值，勿肉眼对字节）。
+- **DAP 厂商接口必须排在 CAN 之前（接口 2）**：OpenOCD cmsis-dap bulk 后端取**第一个**厂商类 bulk 双端点接口（此 build 连接口字符串都不严格校验），CAN 前置会抢走接口 → DAP_Info 发给 CAN 桥 → CMD_INFO failed 而设备端毫无感知（EP 上零事务是判别特征）。现行布局：CDC=0/1、DAP=2（字符串 "CMSIS-DAP"）、CAN=3（字符串 "UniConnect CAN Bridge"），`tools/can_usb_test.py` 的 IF_NUM 须同步。
+- **.bss 不得侵入 0x2000E000 起的调试基建**：PMP 诱饵区（0xE000，2KB）/金丝雀（0xE800）/崩溃黑匣子（0xF000）为固定地址裸访问，.bss 增长盖住后 DAP 队列写入涂改金丝雀→看门狗处决。**Link.ld 已加 `ASSERT(_ebss < 0x2000E000)` 机械防回退**；DAP_PACKET_COUNT 因此 8→2（省 6KB），性能优化腾出内存后再加回。
+- **USBHS RX_DMA 寄存器回读丢 bit29**（RAM 基址 0x20000000 不存储，硬件隐含，CDC/CAN/DAP 三端点实测一致）：任何拿该寄存器与完整指针比较的代码必须**两侧同掩 `& 0x1FFFFFFF`**——watchdog 的 OUT DMA 指向校验曾因截断值比完整指针，CDC 一武装就误杀 monitor 线程（黑匣子 kind=2 实锤）。
+- **栈上字节数组偏移处做 uint32 直写=未对齐地雷**：`uint32_t *w = (uint32_t *)&rsp[2]` 类代码对齐性取决于当次栈布局，昨天的布局碰巧无害、今天漂移即触发对齐陷阱 HardFault 杀死线程（can_bridge GET_STATUS 首例，现象=该命令响应永不到达而线程整体失踪）。多字节装配一律 memcpy 或逐字节。
+- **openocd 观测技巧**：`halt + mdw 符号地址` 可直接读运行固件的任意 RAM/寄存器（计数器/黑匣子/USBHS 现场定位神器，配合 map 文件查地址）；注意 openocd 的 `reset run` 不一定触发 Windows 重枚举，halt/resume 循环反而会扰动总线触发重枚举。
 - **复合模式接口注册顺序必须与描述符一致**：usbd_add_interface 按注册序分配 intf_num；CAN 曾前置抢 0 号，Windows 给 CDC 接口 0 的类请求被路由到无处理器的 CAN 接口 → STALL → usbser 打开报错 31（"设备没有发挥作用"）。
 - **WCH-Link DAP模式(WinUSB)在本机正常的真相: 不走MS OS, 走WCH签名INF驱动包**。WCH-LinkUtility/MRS安装时装入 WCHLinkWDM.INF(oem54.inf, WCH的EV证书签名), 按硬件ID `USB\VID_1A86&PID_8012&MI_00` 精确匹配后绑WinUSB。**WCH自家产品都不依赖MS OS 2.0免驱**。UniConnect量产路线决策: CAN接口改第二CDC(usbser全平台inbox零驱动, 二进制协议不变), DAP走HID v1+bulk v2双接口; MS OS描述符保留但非依赖项。
 - **MS OS 2.0 免驱失败的根因（2026-10-01 已修）**：描述符集两个类型字段违反 MS 规范表 9——集合头 `wDescriptorType` 误为 0x0006（=Model ID，规范固定 22B，我们 10B，长度校验失败）、功能子集头误为 0x0008（=Vendor Revision，未定义用途）。正确值：**集合头 0x0000 / 配置子集 0x01 / 功能子集 0x02 / 兼容ID 0x03 / 注册表属性 0x04**（见 CherryUSB `common/usb_def.h` 288-295 行与微软规范 Table 9）。Windows 按 Model ID 解析失败后整集判废 → 枚举在 BOS 后中止（SET_CONFIG 不发、字符串不读、usbccgp 1ms 内 STATUS_NO_SUCH_DEVICE）——与 ETW 观测完全吻合。此前"描述符内容已排除"结论错误（当时只核对了长度/UUID/GUID，漏了类型值）；KB5124008 补丁时间线是巧合。历史排查中 EP0 多包 bug、ISR 竞态、watchdog 基址、注册顺序、stale object 等修复均为真实缺陷，保留。**真机验证 PASS（2026-10-01）**：接口 2 `Service=WINUSB`、兼容 ID `USB\MS_COMP_WINUSB`，双路 CAN 1000 帧回环全 PASS（`tools/can_usb_test.py`，PID 0x0218）。调试期曾用 PID 0x0220 隔离 Windows 设备缓存，验证后已恢复生产 PID。
@@ -71,6 +77,7 @@ UniConnect：基于 CH32V305CCT6（RISC-V，主频 144MHz）的 CMSIS-DAP 调试
 - CDC↔UART 双向块缓冲零拷贝：已落地，921600–9M 全档位零丢失（回归 11/11 PASS）。
 - CAN 双路驱动 + CAN-USB 桥（WinUSB 复用双路）：已落地，双路 1000 帧回环全 PASS。
 - MS OS 2.0 免驱：根因（描述符类型字段违反规范表 9）已修，真机免驱绑定 WinUSB 验证 PASS。
-- DAP：配置进行中，SWD 线程仍为空实现。
+- **DAP bulk v2 通路已打通（2026-10-01）**：接口 2（"CMSIS-DAP"），OpenOCD 不接目标板可读完整 link 信息（v2/SWD/Atomic/FW 2.1.1/引脚状态），与 CAN 回归双绿。
+- DAP/SWD：命令泵就绪，**SWD 引脚层未验证（下一里程碑：接目标板读 IDCODE）**。
 - CherryRB 已退出数据通路（目录保留、代码未引用），后续新数据通路一律用 `bsp_pool`。
-- 下一步：CAN 接口改第二 CDC（usbser 全平台 inbox 零驱动）+ DAP 走 HID v1/bulk v2 双接口（量产路线决策见已知坑 WCH-Link 条目）。
+- 下一步：SWD 目标板联调；CAN 接口改第二 CDC（usbser 全平台 inbox 零驱动）量产路线评估。
