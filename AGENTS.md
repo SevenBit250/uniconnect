@@ -47,6 +47,7 @@ UniConnect：基于 CH32V305CCT6（RISC-V，主频 144MHz）的 CMSIS-DAP 调试
 - **测试方法论**：Windows usbser 应用层读满即停+下轮 purge 会丢迟到尾巴（测试须累计流比对）；单笔大写饿死读（分块写+低速档 10ms 节奏）；每 512 倍数传输必须 ZLP 否则主机不投递。
 - **子模块异常**：`CherryRB` 在 git index 中是 gitlink 但 `.gitmodules` 无对应条目。
 - USB 时钟：USBPHY 48MHz，PLL 以 HSE 为参考；主频已从早期版本调到 144MHz，勿按旧文档的 132MHz 理解。
+- CAN（2026-09-29 双路驱动起来）：**CH32V30x CAN 为 bxCAN 架构，RM 第 24 章无 DMA 请求线**——用 FIFO0 FMP 中断收帧 + TX 空中断续装邮箱（帧环 SPSC），每帧 ISR 约 4 次寄存器读，1M 波特率满载 ~8k 帧/s 时 ISR 占用 <2%。**WCH 库 `CAN_Init` 成功返回 1 失败返回 0（STM32 风格），不能按真值判断**（曾因 `if(ret)` 把成功当失败在 CAN1 后早退）。库内含特定封装的出厂自检路径（APB1 复位脉冲 + 4Mbps 静默回环自测帧）。引脚：CAN1=PB8/PB9（Remap1，PD0/PD1 在 48 脚不存在）、CAN2=PB12/PB13（固定）。APB1=72MHz（PPRE1_DIV2），1M 波特率 = P4 × 18tq（SJW1+BS1_13tq+BS2_4tq，采样点 77.8%）。`CAN_FilterInit` 只收一个参数（无 CANx，bank 序号决定归属，`CAN_SlaveStartBank` 切分 28 组 bank）。回环自测模式 `CAN_Mode_Silent_LoopBack` 不驱动总线。
 
 ## 约定
 

@@ -107,6 +107,15 @@ typedef struct {
     uint32_t rx_fe;              // 帧错误(线信号质量)
     uint32_t rx_ne;              // 噪声错误
     uint32_t rx_defer;           // partial暂存/队满延迟重试次数(无损, 观测用)
+    /* can 双路 */
+    uint32_t can1_tx;            // CAN1装入邮箱帧数(硬件接受发送)
+    uint32_t can1_rx;            // CAN1 RX ISR收帧数
+    uint32_t can1_err;           // CAN1自测校验失败(内容/序列)
+    uint32_t can2_tx;
+    uint32_t can2_rx;
+    uint32_t can2_err;
+    uint32_t can_rx_drop;        // RX环满丢帧
+    uint32_t can_tx_full;        // TX环满拒发
 } bsp_dbg_t;
 
 extern bsp_dbg_t g_dbg;

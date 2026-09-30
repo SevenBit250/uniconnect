@@ -28,4 +28,13 @@
 #define UART_RX_BLOCK_SIZE   512u   /* = USB HS bulk MPS */
 #define UART_RX_RING_SIZE    8192u  /* 16块, 必须是2的幂且为块尺寸整数倍 */
 
+/* ---- CAN ----
+ * CH32V30x CAN为bxCAN架构(邮箱/FIFO), 无DMA请求线(RM第24章全文无DMA) --
+ * 用FIFO0 FMP中断+帧环实现, 每帧ISR开销4次寄存器读+拷贝16B,
+ * 1M波特率满载(~8k帧/s)时ISR占用<2% CPU, 非瓶颈。
+ * 引脚: CAN1=PB8/PB9(Remap1, PD0/PD1在48脚封装不存在), CAN2=PB12/PB13(固定) */
+#define CAN_BITRATE_KBPS     1000u  /* 目标波特率(回环自测+未来总线) */
+#define CAN_TX_RING_LEN      32u    /* 每通道发送帧环深度 */
+#define CAN_RX_RING_LEN      32u    /* 每通道接收帧环深度 */
+
 #endif

@@ -32,4 +32,10 @@
 
 #define DAP_THREAD_STACK_SIZE      1024u
 
+/**
+ * @brief CAN回环自测线程(驱动起来阶段验收; 接USB桥后整体替换)
+ */
+#define CAN_TEST_THREAD_PRIORITY   20
+#define CAN_TEST_THREAD_STACK_SIZE 512u
+
 #endif
