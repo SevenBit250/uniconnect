@@ -358,8 +358,9 @@ handle_reset:
     li t0, 0x1f
     csrw 0xbc0, t0
 
-/* Enable interrupt nesting and hardware stack */
-	li t0, 0x1f
+/* Enable interrupt nesting, DISABLE hardware stack (bit5): HPE硬件栈高密度中断下
+   弹出错位(实测保存的mstatus值0x7800被恢复进pc/ra致野跳转, mcause=2/mepc=非指令边界) */
+	li t0, 0x3f
 	csrw 0x804, t0
 #	csrw 0x804, zero
 

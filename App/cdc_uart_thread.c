@@ -70,16 +70,19 @@ void cdc_uart_acm_bulk_in (uint8_t busid, uint8_t ep, uint32_t nbytes)
 {
     (void)ep;
     uart_rx_desc_t d;
+    g_dbg.in_bytes += nbytes;
     if (cdc_tx_inflight_valid) {
         cdc_tx_inflight_valid = 0;
         bsp_uart_rx_release(&cdc_tx_inflight);
         g_dbg.in_recycle++;
     }
     if (nbytes && (nbytes % bsp_usb_cdc_get_mps()) == 0) {
-        /* 满512整块: 发ZLP标记传输边界, ZLP完成后再续下一块 */
+        /* 满512整块必须发ZLP: 主机usbser只在传输边界(短包)完成读取,
+         * 不发ZLP数据会滞留在主机驱动里不投递 */
         g_dbg.in_zlp++;
         bsp_usb_cdc_ep_start_write(busid, NULL, 0);
-    } else if (bsp_uart_rx_pop(&d)) {
+    } else if (bsp_uart_rx_pop_coalesce(&d) || (bsp_uart_rx_drain(0), bsp_uart_rx_pop_coalesce(&d))) {
+        /* pop空时主动收割一次再取(贪心发送, 不等里程碑中断) */
         g_dbg.in_pop++;
         cdc_tx_inflight = d;
         cdc_tx_inflight_valid = 1;
@@ -88,6 +91,7 @@ void cdc_uart_acm_bulk_in (uint8_t busid, uint8_t ep, uint32_t nbytes)
             /* 发起失败必须回滚, 否则永远等不到bulk_in而永久死锁 */
             g_dbg.in_write_err++;
             g_dbg.in_write_ret = (uint32_t)ret;
+            g_dbg.in_write_ptr = (uint32_t)d.ptr;
             cdc_tx_inflight_valid = 0;
             bsp_uart_rx_release(&cdc_tx_inflight);
             cdc_handle.tx_buffer_empty = RT_TRUE;
@@ -134,7 +138,7 @@ void cdc_tx_thread_entry(void *param)
         if (cdc_handle.tx_buffer_empty == RT_FALSE) {
             continue;
         }
-        if (bsp_uart_rx_pop(&d)) {
+        if (bsp_uart_rx_pop_coalesce(&d) || (bsp_uart_rx_drain(0), bsp_uart_rx_pop_coalesce(&d))) {
             g_dbg.in_pop++;
             cdc_handle.tx_buffer_empty = RT_FALSE;
             cdc_tx_inflight = d;
@@ -143,6 +147,7 @@ void cdc_tx_thread_entry(void *param)
             if (ret != 0) {
                 g_dbg.in_write_err++;
                 g_dbg.in_write_ret = (uint32_t)ret;
+                g_dbg.in_write_ptr = (uint32_t)d.ptr;
                 cdc_tx_inflight_valid = 0;
                 bsp_uart_rx_release(&cdc_tx_inflight);
                 cdc_handle.tx_buffer_empty = RT_TRUE;   /* 回滚避免死锁 */
@@ -200,11 +205,12 @@ void cdc_ctrl_thread_entry(void *param)
             }
             continue;
         }
-        // 更新串口配置
-        bsp_uart_config (lincoding.dwDTERate, lincoding.bCharFormat, lincoding.bParityType);
-        // 双向重建缓冲: 在途块作为例外保留, 由各自完成路径归还
+        // 更新串口配置+双向重建缓冲: 必须在同一关中断区内完成,
+        // USART重配置(UE翻转)的毛刺若落在重建之外, 会触发ISR提交
+        // 含乒乓旧数据的伪块(表现为下个事务的前缀垃圾)
         {
             rt_base_t level = rt_hw_interrupt_disable();
+            bsp_uart_config (lincoding.dwDTERate, lincoding.bCharFormat, lincoding.bParityType);
             bsp_uart_rx_reset();
             bsp_usb_cdc_rx_reset((uint8_t *)cdc_uart_tx_block);
             rt_hw_interrupt_enable(level);

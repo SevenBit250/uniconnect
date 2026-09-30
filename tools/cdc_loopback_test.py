@@ -53,11 +53,19 @@ def drain(ser, quiet=0.3):
             end = time.time() + quiet
 
 
-def loopback(ser, data, timeout, label, concurrent=False):
+def loopback(ser, data, timeout, label, concurrent=False, pace=0):
     ser.reset_input_buffer()
     t0 = time.time()
     if concurrent:
-        t = threading.Thread(target=lambda: (ser.write(data), ser.flush()))
+        # 分块写+节奏: 单笔大写会让usbser写路径pending而饿死读(主机驱动行为),
+        # 节奏防止写队列堆深; 高波特率不需要节奏(会制造IDLE部分块风暴)
+        def w():
+            for i in range(0, len(data), 4096):
+                ser.write(data[i:i+4096])
+                ser.flush()
+                if pace:
+                    time.sleep(pace)
+        t = threading.Thread(target=w)
         t.start()
         got = read_exact(ser, len(data), timeout)
         t.join(15)
@@ -106,8 +114,8 @@ def main():
     results.append(loopback(ser, pattern(513), 2, "513B(块边界+1)"))
     results.append(loopback(ser, pattern(1024), 2, "1024B(两整块)"))
 
-    print("== 3. 大流量完整性 @115200 (并发读写: 单线程写满缓冲会因无流控丢字节, 属固有行为) ==")
-    results.append(loopback(ser, pattern(64 * 1024, 7), 30, "64KB并发"))
+    print("== 3. 大流量完整性 @115200 (并发读写+10ms节奏: 单笔大写会饿死主机读, 属usbser驱动行为) ==")
+    results.append(loopback(ser, pattern(64 * 1024, 7), 30, "64KB并发", concurrent=True, pace=0.01))
 
     print("== 4. 波特率切换(池重建路径) ==")
     for baud, tag in ((921600, "921600"), (115200, "回115200")):
@@ -124,7 +132,11 @@ def main():
     data = pattern(n, 99)
     ser.reset_input_buffer()
     t0 = time.time()
-    t = threading.Thread(target=lambda: (ser.write(data), ser.flush()))
+    def w5():
+        for i in range(0, n, 4096):
+            ser.write(data[i:i+4096])
+            ser.flush()
+    t = threading.Thread(target=w5)
     t.start()
     got = read_exact(ser, n, 90)
     t.join(15)

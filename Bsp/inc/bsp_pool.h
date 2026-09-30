@@ -89,9 +89,13 @@ typedef struct {
     /* usb in 发送通路 */
     uint32_t in_pop;             // 取块次数
     uint32_t in_recycle;         // 回收次数
+    uint32_t in_bytes;           // IN方向实发字节累计(bulk_in完成nbytes累加)
+    uint32_t out_bytes;          // USB OUT收到字节累计
+    uint32_t tx_bytes;           // UART TX发线字节累计
     uint32_t in_zlp;             // ZLP发送次数
     uint32_t in_write_err;       // start_write返回错误次数
     uint32_t in_write_ret;       // 最近一次错误码
+    uint32_t in_write_ptr;       // 最近一次错误时的缓冲指针
     /* uart tx */
     uint32_t tx_dma;             // DMA发送次数
     uint32_t tx_dma_zero;        // 零长防御触发

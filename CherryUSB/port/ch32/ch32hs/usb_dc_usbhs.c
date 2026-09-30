@@ -325,7 +325,9 @@ void USBD_IRQHandler(uint8_t busid)
                     ep0_tx_data_toggle = true;
                 }
             } else {
-                if (g_ch32_usbhs_udc.in_ep[ep_idx].xfer_len > g_ch32_usbhs_udc.in_ep[ep_idx].ep_mps) {
+                /* off-by-one修复: 原条件为'>', 剩余恰为一包(==mps)时误走完成分支,
+                 * 尾包被计入actual却从未发出(合并大传输时丢512B的根因) */
+                if (g_ch32_usbhs_udc.in_ep[ep_idx].xfer_len >= g_ch32_usbhs_udc.in_ep[ep_idx].ep_mps) {
                     g_ch32_usbhs_udc.in_ep[ep_idx].xfer_buf += g_ch32_usbhs_udc.in_ep[ep_idx].ep_mps;
                     g_ch32_usbhs_udc.in_ep[ep_idx].xfer_len -= g_ch32_usbhs_udc.in_ep[ep_idx].ep_mps;
                     g_ch32_usbhs_udc.in_ep[ep_idx].actual_xfer_len += g_ch32_usbhs_udc.in_ep[ep_idx].ep_mps;
@@ -373,8 +375,16 @@ void USBD_IRQHandler(uint8_t busid)
                     ep0_rx_data_toggle ^= 1;
                 }
             } else {
-                if (USBHS_DEVICE->INT_ST & USBHS_DEV_UIS_TOG_OK) {
+                if ((g_ch32_usbhs_udc.out_ep[ep_idx].xfer_buf != NULL) &&
+                    (g_ch32_usbhs_udc.out_ep[ep_idx].xfer_len != 0) &&
+                    (USBHS_DEVICE->INT_ST & USBHS_DEV_UIS_TOG_OK)) {
+                    /* 守卫: 总线复位会memset端点状态, 挂起的陈旧OUT完成事件若继续
+                     * 处理, xfer_len下溢成巨值会走续传分支, 把RX_DMA写成垃圾地址,
+                     * USB OUT DMA随即把数据包写入任意RAM(实测涂烂黑匣子/TCB区) */
                     read_count = USBHS_DEVICE->RX_LEN;
+                    if (read_count > g_ch32_usbhs_udc.out_ep[ep_idx].xfer_len) {
+                        read_count = g_ch32_usbhs_udc.out_ep[ep_idx].xfer_len;
+                    }
 
                     g_ch32_usbhs_udc.out_ep[ep_idx].xfer_buf += read_count;
                     g_ch32_usbhs_udc.out_ep[ep_idx].actual_xfer_len += read_count;

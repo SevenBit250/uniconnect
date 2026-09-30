@@ -38,6 +38,7 @@ static void bsp_usb_cdc_arm_out(uint8_t *block)
 static void bsp_usb_cdc_out_done(uint16_t nbytes)
 {
     g_dbg.out_done++;
+    g_dbg.out_bytes += nbytes;
     if (nbytes == 0) {
         /* 主机ZLP: 无数据, 原块重挂端点, 不提交不唤醒 */
         g_dbg.out_zlp++;

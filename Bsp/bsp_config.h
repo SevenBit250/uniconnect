@@ -22,8 +22,10 @@
 #define USB_CDC_OUT_BLOCK_COUNT 8u     /* 池深 8*512=4KB */
 
 
-/* uart rx 块缓冲池: DMA直接落块, 零拷贝交接USBHS DMA (块首恒4字节对齐) */
+/* uart rx 环形缓冲: 循环DMA落环, 满块贪心收割零拷贝交接USBHS DMA
+ * (块首恒4字节对齐)。深度=抖动容忍: 8KB@921600≈89ms, 主机读轮询抖动
+ * 远小于此 => 活跃读取下零丢失; 仅主机彻底停读时回绕丢弃(真无流控边界) */
 #define UART_RX_BLOCK_SIZE   512u   /* = USB HS bulk MPS */
-#define UART_RX_BLOCK_COUNT  8u     /* 池深 8*512=4KB */
+#define UART_RX_RING_SIZE    8192u  /* 16块, 必须是2的幂且为块尺寸整数倍 */
 
 #endif

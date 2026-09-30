@@ -44,7 +44,7 @@ uint8_t *bsp_pool_acquire(bsp_pool_t *pool)
     uint8_t idx = pool->free_stack[--pool->free_top];
     if (idx >= pool->count) {
         /* free_stack被踩: 记录进黑匣子(借用crash区[8..11])并死循环保留现场 */
-        volatile uint32_t *box = (volatile uint32_t *)0x2000E000;
+        volatile uint32_t *box = (volatile uint32_t *)0x2000F000;
         box[8] = 0x5000C0DE;
         box[9] = (uint32_t)pool;
         box[10] = idx;

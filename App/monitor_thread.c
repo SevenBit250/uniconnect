@@ -1,6 +1,7 @@
 #include "bsp.h"
 #include "main.h"
 #include <rtthread.h>
+#include "bsp_watchdog.h"
 
 static struct rt_thread monitor_thread;
 ALIGN(RT_ALIGN_SIZE) static char monitor_thread_stack[1024];
@@ -10,6 +11,7 @@ static void monitor_thread_entry(void *param)
 {
     static system_status_t last_state;
     while (1) {
+        bsp_watchdog_check();   /* 金丝雀+OUT DMA指向看门狗 */
         system_status_t state = getSystemStatus();
         switch (state) {
             case SYS_STA_USB_NOT_CONNECTED:
