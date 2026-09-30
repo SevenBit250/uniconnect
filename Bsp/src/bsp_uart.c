@@ -18,9 +18,9 @@
 /***************************************************************************/
 
 static __attribute__((aligned(4))) uint8_t uart_rx_ring[UART_RX_RING_SIZE];
-/* 暂存槽须容纳最大部分段(块尾<512, 块对齐起点, 不会跨环回绕) */
-static __attribute__((aligned(4))) uint8_t uart_rx_stage[2][UART_RX_BLOCK_SIZE];
-static volatile uint8_t uart_rx_stage_busy[2];
+/* 暂存槽须容纳最大部分段(块尾<512, 块对齐起点, 不会跨环回绕); 4槽冗余 */
+static __attribute__((aligned(4))) uint8_t uart_rx_stage[4][UART_RX_BLOCK_SIZE];
+static volatile uint8_t uart_rx_stage_busy[4];
 
 static volatile uint32_t uart_rx_abs;           /* DMA绝对写位置(字节, 单调) */
 static volatile uint32_t uart_rx_consumed_abs;  /* 已提交绝对位置 */
@@ -52,16 +52,16 @@ static void bsp_uart_rx_sync(void)
     uart_rx_abs = abs;
 }
 
-/* 提交一个满块(绝对区间[start,start+512), 环内必然不跨回绕) */
-static void bsp_uart_rx_push_full(uint32_t start)
+/* 提交一个满块(绝对区间[start,start+512), 环内必然不跨回绕)
+ * 队满时返回0不推进账目(延迟重试), 由调用方drain稍后以同区间重推 */
+static uint8_t bsp_uart_rx_push_full(uint32_t start)
 {
     rt_base_t level = rt_hw_interrupt_disable();
     if (uart_rx_q_cnt >= UART_RX_Q_LEN) {
-        uart_rx_consumed_abs = start + UART_RX_BLOCK_SIZE;   /* 队满丢块仍推进账目 */
         uart_handle.rx_paused = 1;
-        g_dbg.submit_drop++;
+        g_dbg.rx_defer++;
         rt_hw_interrupt_enable(level);
-        return;
+        return 0;
     }
     uart_rx_qent_t *e = &uart_rx_q[uart_rx_q_wt];
     e->ptr = &uart_rx_ring[start & (UART_RX_RING_SIZE - 1)];
@@ -74,18 +74,33 @@ static void bsp_uart_rx_push_full(uint32_t start)
     rt_hw_interrupt_enable(level);
     g_dbg.uart_submits++;
     rt_sem_release(&uart_handle.data_ready_sem);
+    return 1;
 }
 
-/* 提交部分块(流尾, 拷入暂存槽) */
-static void bsp_uart_rx_push_partial(uint32_t start, uint16_t len)
+/* 提交部分块(流尾, 拷入暂存槽)
+ * 槽忙/队满时返回0不推进账目(无损延迟): 数据仍在环内, 下次drain重试;
+ * 期间新数据到达则自然合并成满块零拷贝提交.
+ * 旧实现此处直接丢数据(submit_drop)并推进账目 —— 混合负载下相邻批次
+ * 流尾partial连续到达而消费端(IN完成释放槽)未跟上时丢字节, 5M实测14次/300s */
+static uint8_t bsp_uart_rx_push_partial(uint32_t start, uint16_t len)
 {
     rt_base_t level = rt_hw_interrupt_disable();
-    uint8_t s = (uart_rx_stage_busy[0]) ? 1 : 0;
-    if (uart_rx_stage_busy[s] || uart_rx_q_cnt >= UART_RX_Q_LEN) {
+    if (uart_rx_abs - start >= (UART_RX_RING_SIZE - UART_RX_BLOCK_SIZE)) {
+        /* 真实溢出(主机长期不读IN): 环内源数据已被回绕覆写, 只能丢弃推进,
+         * 否则暂存出的陈旧字节会被当新数据发出(幽灵数据) */
         uart_rx_consumed_abs = start + len;
         g_dbg.submit_drop++;
         rt_hw_interrupt_enable(level);
-        return;
+        return 1;
+    }
+    uint8_t s;
+    for (s = 0; s < 4; s++) {
+        if (!uart_rx_stage_busy[s]) break;
+    }
+    if (s >= 4 || uart_rx_q_cnt >= UART_RX_Q_LEN) {
+        g_dbg.rx_defer++;
+        rt_hw_interrupt_enable(level);
+        return 0;
     }
     uart_rx_stage_busy[s] = 1;
     memcpy(uart_rx_stage[s], &uart_rx_ring[start & (UART_RX_RING_SIZE - 1)], len);
@@ -100,6 +115,7 @@ static void bsp_uart_rx_push_partial(uint32_t start, uint16_t len)
     rt_hw_interrupt_enable(level);
     g_dbg.uart_submits++;
     rt_sem_release(&uart_handle.data_ready_sem);
+    return 1;
 }
 
 /* 收割: 任意相位的数据流按512硬边界切分.
@@ -121,23 +137,29 @@ void bsp_uart_rx_drain(uint8_t final)
         /* 相位头: 补齐到下一个硬边界 */
         uint32_t nb = (c + blk - 1) & ~(blk - 1);
         if (pos >= nb) {
-            bsp_uart_rx_push_partial(c, (uint16_t)(nb - c));
+            if (!bsp_uart_rx_push_partial(c, (uint16_t)(nb - c))) {
+                rt_hw_interrupt_enable(level);   /* 槽忙延迟: 保序, 后续块一并等 */
+                return;
+            }
             c = uart_rx_consumed_abs;
         } else {
             if (final && pos > c) {
-                bsp_uart_rx_push_partial(c, (uint16_t)(pos - c));
+                bsp_uart_rx_push_partial(c, (uint16_t)(pos - c));   /* 失败无害, 下次重试 */
             }
             rt_hw_interrupt_enable(level);
             return;
         }
     }
     while (pos - c >= blk) {
-        bsp_uart_rx_push_full(c);
+        if (!bsp_uart_rx_push_full(c)) {
+            rt_hw_interrupt_enable(level);   /* 队满延迟: 消费端drain会重推 */
+            return;
+        }
         g_dbg.uart_tc_evt++;
         c = uart_rx_consumed_abs;
     }
     if (final && pos > c) {
-        bsp_uart_rx_push_partial(c, (uint16_t)(pos - c));
+        bsp_uart_rx_push_partial(c, (uint16_t)(pos - c));   /* 失败无害, 下次重试 */
     }
     rt_hw_interrupt_enable(level);
 }
@@ -301,6 +323,7 @@ void bsp_uart_rx_reset(void)
     DMA_ClearITPendingBit(DMA1_IT_GL5);
     uart_rx_q_rd = uart_rx_q_wt = uart_rx_q_cnt = 0;
     uart_rx_stage_busy[0] = uart_rx_stage_busy[1] = 0;
+    uart_rx_stage_busy[2] = uart_rx_stage_busy[3] = 0;
     bsp_uart_rx_sync();
     uart_rx_consumed_abs = uart_rx_abs;   /* 任意相位, drain会自动补相位头partial */
     uart_handle.rx_paused = 0;
@@ -419,6 +442,12 @@ void USART1_IRQHandler (void) __attribute__ ((interrupt ("WCH-Interrupt-fast")))
 void USART1_IRQHandler (void) {
     if (USART_GetITStatus(USART1, USART_IT_IDLE) != RESET){
         rt_interrupt_enter();
+        /* 采样线级错误标志: 本ISR的SR读+DR读序列会静默清除ORE/FE/NE,
+         * 不先采样则丢字节发生也无处可查(ORE=RX FIFO溢出, 5M丢字节主嫌) */
+        uint32_t sr = USART1->STATR;
+        if (sr & USART_FLAG_ORE) g_dbg.rx_ore++;
+        if (sr & USART_FLAG_FE)  g_dbg.rx_fe++;
+        if (sr & USART_FLAG_NE)  g_dbg.rx_ne++;
         USART_ReceiveData(USART1);
         g_dbg.uart_idle_evt++;
         bsp_uart_rx_drain(1);

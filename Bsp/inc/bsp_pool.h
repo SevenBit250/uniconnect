@@ -102,6 +102,11 @@ typedef struct {
     /* 池状态机异常 */
     uint32_t recycle_drop;       // 非法回收被丢弃
     uint32_t submit_drop;        // 非法提交被丢弃
+    /* usart线级错误观测(IDLE ISR中采样STATR, SR+DR序列会静默清标志) */
+    uint32_t rx_ore;             // 溢出=RX线级丢字节铁证
+    uint32_t rx_fe;              // 帧错误(线信号质量)
+    uint32_t rx_ne;              // 噪声错误
+    uint32_t rx_defer;           // partial暂存/队满延迟重试次数(无损, 观测用)
 } bsp_dbg_t;
 
 extern bsp_dbg_t g_dbg;
