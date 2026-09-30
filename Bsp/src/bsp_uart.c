@@ -37,6 +37,7 @@ static uart_rx_qent_t uart_rx_q[UART_RX_Q_LEN];
 static volatile uint8_t uart_rx_q_rd, uart_rx_q_wt, uart_rx_q_cnt;
 
 bsp_uart_buffer_t uart_handle;
+volatile uint32_t g_out_tog_drop = 0;   /* USB OUT因TOG_OK失败被驱动丢弃的包数 */
 
 /* 用当前CNTR刷新绝对写位置(处理环回绕, ISR/线程均可调) */
 static void bsp_uart_rx_sync(void)

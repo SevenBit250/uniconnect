@@ -375,6 +375,10 @@ void USBD_IRQHandler(uint8_t busid)
                     ep0_rx_data_toggle ^= 1;
                 }
             } else {
+                if (!(USBHS_DEVICE->INT_ST & USBHS_DEV_UIS_TOG_OK)) {
+                    extern volatile uint32_t g_out_tog_drop;
+                    g_out_tog_drop++;   /* TOG_OK失败被丢弃的包(已ACK, 数据黑洞) */
+                }
                 if ((g_ch32_usbhs_udc.out_ep[ep_idx].xfer_buf != NULL) &&
                     (g_ch32_usbhs_udc.out_ep[ep_idx].xfer_len != 0) &&
                     (USBHS_DEVICE->INT_ST & USBHS_DEV_UIS_TOG_OK)) {
