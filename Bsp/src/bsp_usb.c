@@ -249,8 +249,8 @@ int bsp_usb_cdc_get_mps(void)
 /***************************************************************************/
 bsp_usb_dap_buffer_t dap_handle;
 
-/* MSOS2.0免驱开关: 1=启用(正式版Windows免驱) 0=关闭(本机预览版调试用, Zadig手动绑定) */
-#define USB_DEBUG_MSOS 0
+/* MSOS2.0免驱开关: 1=启用(Windows 8.1+自动绑定WinUSB) 0=关闭(调试用, Zadig手动绑定) */
+#define USB_DEBUG_MSOS 1
 
 /***************************************************************************/
 /*                                                                         */
@@ -285,11 +285,13 @@ static const uint8_t config_descriptor[] = {
     0x07, 0x05, CAN_IF_IN_EP, 0x02, 0x00, 0x02, 0x00,
 };
 
-/* MS OS 2.0描述符集(166B): 头固定10B(len/type/ver/total, 无保留字节--16B带保留
- * 会被Windows按固定10B解析出垃圾子集头而静默放弃绑定)。仅接口2(CAN)绑定WINUSB。 */
+/* MS OS 2.0描述符集(170B=集合头10+功能子集8+兼容ID 20+属性132)。类型值必须按
+ * MS规范表9: 集合头0x00/功能子集头0x02/兼容ID 0x03/注册表属性0x04(0x06=ModelID,
+ * 0x08=厂商版本)。曾误用0x06/0x08: Windows按ModelID解析10B头但该类型固定22B,
+ * 长度不符整集判废, 枚举在BOS后中止(usbccgp报STATUS_NO_SUCH_DEVICE)。 */
 static const uint8_t msosv2_descriptor_set[] = {
-    0x0A, 0x00, 0x06, 0x00, 0x00, 0x00, 0x03, 0x06, 0xAA, 0x00, 0x08, 0x00,
-    0x08, 0x00, 0x02, 0x00, 0xA0, 0x00, 0x14, 0x00, 0x03, 0x00, 0x57, 0x49,
+    0x0A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x06, 0xAA, 0x00, 0x08, 0x00,
+    0x02, 0x00, 0x02, 0x00, 0xA0, 0x00, 0x14, 0x00, 0x03, 0x00, 0x57, 0x49,
     0x4E, 0x55, 0x53, 0x42, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x84, 0x00, 0x04, 0x00, 0x07, 0x00, 0x2A, 0x00, 0x44, 0x00,
     0x65, 0x00, 0x76, 0x00, 0x69, 0x00, 0x63, 0x00, 0x65, 0x00, 0x49, 0x00,
@@ -340,7 +342,7 @@ static const char *string_descriptors[] = {
     (const char[]){0x09, 0x04}, /* Langid */
     "UniConnect", /* Manufacturer */
     "UniConnect CMSIS-DAP Bridge", /* Product */
-    "UNICONNECT-17", /* Serial Number: 变更可触发Windows全新安装(重跑MSOS2.0绑定) */
+    "UNICONNECT-18", /* Serial Number: 变更可触发Windows全新安装(重跑MSOS2.0绑定) */
 };
 
 static const uint8_t *device_descriptor_callback (uint8_t speed) {
@@ -367,7 +369,7 @@ const struct usb_descriptor usb_descriptor = {
     .config_descriptor_callback = config_descriptor_callback,
     .device_quality_descriptor_callback = device_quality_descriptor_callback,
     .string_descriptor_callback = string_descriptor_callback,
-#if USB_DEBUG_MSOS   /* 本机25H2预览版: MSOS读取后中止枚举, 调试期关闭; 正式版Windows验证后恢复 */
+#if USB_DEBUG_MSOS   /* MSOS2.0: BOS平台能力+描述符集, Windows 8.1+免驱绑定WinUSB */
     .msosv2_descriptor = &msosv2_desc,
     .bos_descriptor = &bos_desc,
 #endif

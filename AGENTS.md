@@ -1,6 +1,6 @@
 # AGENTS.md
 
-UniConnect：基于 CH32V305CCT6（RISC-V，主频 144MHz）的 CMSIS-DAP 调试探针固件，目标功能为 SWD 调试 + CDC 虚拟串口 + 双路 CAN（CAN 未开发）。运行 RT-Thread Nano。
+UniConnect：基于 CH32V305CCT6（RISC-V，主频 144MHz）的 CMSIS-DAP 调试探针固件，目标功能为 SWD 调试 + CDC 虚拟串口 + 双路 CAN。运行 RT-Thread Nano。当前状态：CDC↔UART 与 CAN-USB 桥已落地并真机回归 PASS，MS OS 2.0 免驱已修通；DAP/SWD 进行中。
 
 ## 构建与调试
 
@@ -15,7 +15,7 @@ UniConnect：基于 CH32V305CCT6（RISC-V，主频 144MHz）的 CMSIS-DAP 调试
 
 - `User/` — `main()` 仅空循环，系统状态机（`system_status_t`，main.h）；`config.h` 集中定义各线程优先级与栈大小；中断处理在 `ch32v30x_it.c`。
 - `App/` — RT-Thread 线程层：`cdc_uart_thread.c`（CDC↔UART 双向块缓冲零拷贝桥，tx/rx/ctrl/LED 四线程）、`dap_thread.c`（CMSIS-DAP 命令泵，USB 请求/响应队列）、`monitor_thread.c`（按系统状态驱动 LED 动画）、`app_entry.c`（`INIT_APP_EXPORT` 自启动入口）。
-- `Bsp/` — 硬件抽象层，App 只准通过 `bsp_led_*` / `bsp_uart_*` / `bsp_usb_*` API 访问硬件，不直接调外设库。`Bsp/bsp_pool.{h,c}` 是通用块缓冲池组件（FREE→LANDING→READY→OUT 状态机，关中断临界区内只做索引运算）；UART RX 与 CDC OUT 两条高速通路的数据缓冲全部走它，块首恒 4 字节对齐。`bsp_config.h` 定义 USB 端点地址（DAP_IN 0x81 / DAP_OUT 0x02 / CDC_IN 0x82 / CDC_OUT 0x04）、VID/PID (0x0D28/0x0204) 及两个块池的块尺寸/池深。
+- `Bsp/` — 硬件抽象层，App 只准通过 `bsp_led_*` / `bsp_uart_*` / `bsp_usb_*` API 访问硬件，不直接调外设库。`Bsp/bsp_pool.{h,c}` 是通用块缓冲池组件（FREE→LANDING→READY→OUT 状态机，关中断临界区内只做索引运算）；UART RX 与 CDC OUT 两条高速通路的数据缓冲全部走它，块首恒 4 字节对齐。`bsp_config.h` 定义 USB 端点地址（DAP_IN 0x81 / DAP_OUT 0x02 / CDC_IN 0x82 / CDC_OUT 0x04）、VID/PID (0x0D28/0x0218) 及两个块池的块尺寸/池深。
 - `Dap/` — CMSIS-DAP 官方源码（DAP.c/SW_DP.c/DAP_queue.c 等），硬件相关全部在 `DAP_config.h`（CPU_CLOCK=144MHz，SWD/JTAG 引脚映射）。
 - `CherryUSB/` — vendored 的 CherryUSB v1.51 协议栈（非子模块，可直接改），CH32 移植层在 `port/ch32/ch32hs/`，通过 `osal/` 对接 RT-Thread。
 - `CherryRB/` — 环形缓冲区库。
@@ -26,8 +26,6 @@ UniConnect：基于 CH32V305CCT6（RISC-V，主频 144MHz）的 CMSIS-DAP 调试
 ## 启动流程
 
 `Startup → SystemInit() → main()（空循环）→ rtthread_startup() → INIT_APP_EXPORT(app_entry) → 各线程启动`
-
-## 已知坑
 
 ## 已知坑
 
@@ -50,8 +48,12 @@ UniConnect：基于 CH32V305CCT6（RISC-V，主频 144MHz）的 CMSIS-DAP 调试
 - **USBHS 真实基址是 0x40023400（非 0x40022000！）**：watchdog 曾用错基址读 UEP4_RX_DMA 得垃圾值，复合模式 CDC 武装后必误杀芯片（表现：设备整个从总线消失）。EP4_RX_DMA = base+0x2C。
 - **复合模式接口注册顺序必须与描述符一致**：usbd_add_interface 按注册序分配 intf_num；CAN 曾前置抢 0 号，Windows 给 CDC 接口 0 的类请求被路由到无处理器的 CAN 接口 → STALL → usbser 打开报错 31（"设备没有发挥作用"）。
 - **WCH-Link DAP模式(WinUSB)在本机正常的真相: 不走MS OS, 走WCH签名INF驱动包**。WCH-LinkUtility/MRS安装时装入 WCHLinkWDM.INF(oem54.inf, WCH的EV证书签名), 按硬件ID `USB\VID_1A86&PID_8012&MI_00` 精确匹配后绑WinUSB。**WCH自家产品都不依赖MS OS 2.0免驱**。UniConnect量产路线决策: CAN接口改第二CDC(usbser全平台inbox零驱动, 二进制协议不变), DAP走HID v1+bulk v2双接口; MS OS描述符保留但非依赖项。
-- **MS OS 2.0 免驱在本机 Win11 25H2 正式版(build 26200)中止枚举**：bcdUSB≥0x0210+BOS+MSOS 描述符集（与 CherryDAP 逐字节一致）发出后，主机读完 vendor 应答即中止（SET_CONFIG 永不发出、字符串不读、4 轮重试后放弃，driver=null/STATUS_NO_SUCH_DEVICE）。已排除：描述符内容（多轮结构+知名 GUID）、EP0 多包（已修累计值 bug）、ISR 竞态（已闭环）、watchdog 误杀（已修）、注册顺序（已修）、stale object（已修）、UsbFlags 毒缓存（已清）、USB Hub 路径（已直插根口）。**同固件 MSOS=0 时一切正常**。固件侧已尽力，待另一台 Windows 机器验证（插上即测）；通过后置 `USB_DEBUG_MSOS=1` 即恢复免驱。调试期用 Zadig 给接口 2 手动绑 WinUSB（PID 0x0218）。
+- **MS OS 2.0 免驱失败的根因（2026-10-01 已修）**：描述符集两个类型字段违反 MS 规范表 9——集合头 `wDescriptorType` 误为 0x0006（=Model ID，规范固定 22B，我们 10B，长度校验失败）、功能子集头误为 0x0008（=Vendor Revision，未定义用途）。正确值：**集合头 0x0000 / 配置子集 0x01 / 功能子集 0x02 / 兼容ID 0x03 / 注册表属性 0x04**（见 CherryUSB `common/usb_def.h` 288-295 行与微软规范 Table 9）。Windows 按 Model ID 解析失败后整集判废 → 枚举在 BOS 后中止（SET_CONFIG 不发、字符串不读、usbccgp 1ms 内 STATUS_NO_SUCH_DEVICE）——与 ETW 观测完全吻合。此前"描述符内容已排除"结论错误（当时只核对了长度/UUID/GUID，漏了类型值）；KB5124008 补丁时间线是巧合。历史排查中 EP0 多包 bug、ISR 竞态、watchdog 基址、注册顺序、stale object 等修复均为真实缺陷，保留。**真机验证 PASS（2026-10-01）**：接口 2 `Service=WINUSB`、兼容 ID `USB\MS_COMP_WINUSB`，双路 CAN 1000 帧回环全 PASS（`tools/can_usb_test.py`，PID 0x0218）。调试期曾用 PID 0x0220 隔离 Windows 设备缓存，验证后已恢复生产 PID。
 - CAN（2026-09-29 双路驱动起来）：**CH32V30x CAN 为 bxCAN 架构，RM 第 24 章无 DMA 请求线**——用 FIFO0 FMP 中断收帧 + TX 空中断续装邮箱（帧环 SPSC），每帧 ISR 约 4 次寄存器读，1M 波特率满载 ~8k 帧/s 时 ISR 占用 <2%。**WCH 库 `CAN_Init` 成功返回 1 失败返回 0（STM32 风格），不能按真值判断**（曾因 `if(ret)` 把成功当失败在 CAN1 后早退）。库内含特定封装的出厂自检路径（APB1 复位脉冲 + 4Mbps 静默回环自测帧）。引脚：CAN1=PB8/PB9（Remap1，PD0/PD1 在 48 脚不存在）、CAN2=PB12/PB13（固定）。APB1=72MHz（PPRE1_DIV2），1M 波特率 = P4 × 18tq（SJW1+BS1_13tq+BS2_4tq，采样点 77.8%）。`CAN_FilterInit` 只收一个参数（无 CANx，bank 序号决定归属，`CAN_SlaveStartBank` 切分 28 组 bank）。回环自测模式 `CAN_Mode_Silent_LoopBack` 不驱动总线。
+
+## 开发铁律
+
+- **[铁律] 遇到顽固 bug 必须调用 `engineering-method` skill（用户级 `~/.zcode/skills/engineering-method/`），不得凭惯性继续排查**。触发线（任一）：同一故障第 2 个假说死亡；开始怀疑 OS 补丁/硅级 bug/竞态/"玄学"等外因；"已排除"的结论被反复拿出来重审；修了真实缺陷但原始症状纹丝不动。触发后停止生产新假说，按 skill 的四条增量纪律执行：排除结论必须带覆盖清单、外因假说须机制或对照实验、修复≠根因（正交缺陷陷阱）、真值三源对照（规范表格/vendored 常量/真机抓包）。MS OS 2.0 免驱排查（根因 2 字节、疑点十几个、耗时数周）是其锚点案例，翻车详情见 skill 的 references。
 
 ## 约定
 
@@ -61,6 +63,11 @@ UniConnect：基于 CH32V305CCT6（RISC-V，主频 144MHz）的 CMSIS-DAP 调试
 - 状态 LED 共 5 个（SYS/SWD/COM/CAN1/CAN2），统一通过 `bsp_led_ctrl/toggle` 操作，高电平为灭。
 - 新线程的优先级/栈大小必须加到 `User/config.h`，不要在源文件里写魔数。
 
-## 当前进度（2026-09）
+## 当前进度（2026-10）
 
-CDC↔UART 双向块缓冲零拷贝已落地（待上板回归：枚举/回环大流量/逐字符/线控切换/背压恢复）；DAP 配置进行中（暂存状态）；SWD 线程为空实现；CAN 未开始。CherryRB 已退出数据通路（目录保留、代码未引用），后续新数据通路一律用 `bsp_pool`。
+- CDC↔UART 双向块缓冲零拷贝：已落地，921600–9M 全档位零丢失（回归 11/11 PASS）。
+- CAN 双路驱动 + CAN-USB 桥（WinUSB 复用双路）：已落地，双路 1000 帧回环全 PASS。
+- MS OS 2.0 免驱：根因（描述符类型字段违反规范表 9）已修，真机免驱绑定 WinUSB 验证 PASS。
+- DAP：配置进行中，SWD 线程仍为空实现。
+- CherryRB 已退出数据通路（目录保留、代码未引用），后续新数据通路一律用 `bsp_pool`。
+- 下一步：CAN 接口改第二 CDC（usbser 全平台 inbox 零驱动）+ DAP 走 HID v1/bulk v2 双接口（量产路线决策见已知坑 WCH-Link 条目）。
