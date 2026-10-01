@@ -7,8 +7,9 @@
  */
 #define MONITOR_THREAD_PRIORITY             22
 
-/* monitor兼统一LED管理(看门狗+SYS心跳+吞吐活动灯+确认双闪), 调用链浅 */
-#define MONITOR_THREAD_STACK_SIZE           1024u
+/* monitor兼统一LED管理(看门狗+SYS心跳+吞吐活动灯+确认双闪), 调用链浅。
+ * 2026-10-01混合压测(30min CAN1M+CDC5M并发)实测水位644B=62%触报警线, 提至1536 */
+#define MONITOR_THREAD_STACK_SIZE           1536u
 
 /**
  * @brief CDC服务线程优先级和线程栈配置
