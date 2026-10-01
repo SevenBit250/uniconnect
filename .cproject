@@ -137,8 +137,13 @@
                   <listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/CherryUSB/common}&quot;"/>
                   <listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/CherryUSB/core}&quot;"/>
                   <listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/CherryUSB/port/ch32/ch32hs}&quot;"/>
-                  <listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/Bsp/inc}&quot;"/>
                   <listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/Bsp}&quot;"/>
+                  <listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/Bsp/device/can}&quot;"/>
+                  <listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/Bsp/device/led}&quot;"/>
+                  <listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/Bsp/device/uart}&quot;"/>
+                  <listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/Bsp/device/usb}&quot;"/>
+                  <listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/Bsp/components/block_buffer_pool}&quot;"/>
+                  <listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/Bsp/components/watchdog}&quot;"/>
                   <listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/Dap}&quot;"/>
                   <listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/Dap/inc}&quot;"/>
                 </option>

@@ -16,7 +16,7 @@ UniConnect：基于 CH32V305CCT6（RISC-V，主频 144MHz）的 CMSIS-DAP 调试
 
 - `User/` — `main()` 仅空循环，系统状态机（`system_status_t`，main.h）；`config.h` 集中定义各线程优先级与栈大小；中断处理在 `ch32v30x_it.c`。
 - `App/` — RT-Thread 线程层：`cdc_uart_thread.c`（CDC↔UART 双向块缓冲零拷贝桥，tx/rx/ctrl 三线程）、`dap_thread.c`（CMSIS-DAP 命令泵，USB 请求/响应队列）、`monitor_thread.c`（统一 LED 管理 + 看门狗：SYS 心跳/流水、COM/CAN1/CAN2 吞吐活动灯按 g_dbg 计数器 10ms 轮询最小亮 30ms、线控确认双闪，数据路径零 LED 代码）。
-- `Bsp/` — 硬件抽象层，App 只准通过 `bsp_led_*` / `bsp_uart_*` / `bsp_usb_*` API 访问硬件，不直接调外设库。`Bsp/bsp_pool.{h,c}` 是通用块缓冲池组件（FREE→LANDING→READY→OUT 状态机，关中断临界区内只做索引运算）；UART RX 与 CDC OUT 两条高速通路的数据缓冲全部走它，块首恒 4 字节对齐。`bsp_config.h` 定义 USB 端点地址（DAP_IN 0x81 / DAP_OUT 0x02 / CDC_IN 0x82 / CDC_OUT 0x04）、VID/PID (0x0D28/0x0218) 及两个块池的块尺寸/池深。
+- `Bsp/` — 硬件抽象层，App 只准通过 `bsp_led_*` / `bsp_uart_*` / `bsp_usb_*` API 访问硬件，不直接调外设库。2026-10-01 重构为 device/components 两层：`device/{can,led,uart,usb}/` 各含外设驱动 `.c/.h`；`components/block_buffer_pool/`（`bsp_pool`，通用块缓冲池组件，FREE→LANDING→READY→OUT 状态机，关中断临界区内只做索引运算；UART RX 与 CDC OUT 两条高速通路的数据缓冲全部走它，块首恒 4 字节对齐）、`components/watchdog/`（金丝雀+OUT DMA 指向校验+黑匣子）。`bsp_config.h` 与伞头 `bsp.h` 留在 `Bsp/` 根，集中定义 USB 端点地址（DAP_IN 0x81 / DAP_OUT 0x02 / CDC_IN 0x82 / CDC_OUT 0x04）、VID/PID (0x0D28/0x0218) 及两个块池的块尺寸/池深。新增 Bsp 源文件须放入对应 device/components 子目录并在 obj 下配 subdir.mk（可参考 obj/Bsp/device/can/subdir.mk 模板，或让 MRS 重新生成）。
 - `Dap/` — CMSIS-DAP 官方源码（DAP.c/SW_DP.c/DAP_queue.c 等），硬件相关全部在 `DAP_config.h`（CPU_CLOCK=144MHz，SWD/JTAG 引脚映射）。
 - `CherryUSB/` — vendored 的 CherryUSB v1.51 协议栈（非子模块，可直接改），CH32 移植层在 `port/ch32/ch32hs/`，通过 `osal/` 对接 RT-Thread。
 - `RtthreadNano/` — RT-Thread Nano 子模块（github rtthread-nano）。
