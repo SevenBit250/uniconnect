@@ -418,6 +418,7 @@ static uint32_t DAP_SWJ_Clock(const uint8_t *request, uint8_t *response) {
   }
 
   Set_Clock_Delay(clock);
+  bsp_dap_spi_set_clock(clock);   /* SPI加速引擎分频跟随(bsp_dap内部守卫, GPIO引擎为空操作) */
 
   *response = DAP_OK;
 #else

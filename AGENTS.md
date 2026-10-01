@@ -62,6 +62,7 @@ UniConnect：基于 CH32V305CCT6（RISC-V，主频 144MHz）的 CMSIS-DAP 调试
 
 ## 开发铁律
 
+- **[铁律·自杀性测试禁令（2026-10-01 实锚案例）]** 任何可能切断芯片自身恢复途径的操作（SWJ_Disable 关调试口、关 USB 而它是唯一烧录通路、PFIC 调试位、看门狗不可喂等），**禁止未经“已验证的恢复路径”就上真机测试**——且必须先自问“这代码若每次开机都跑，我还能不能烧录”。本板无 BOOT 测试点，SDI 一断只能物理抢救。具体地：**CH32V305 上 `GPIO_Remap_SWJ_Disable` 会在运行期切断两线 SDI 调试口（wch-link 立即失联），且 PB3/PB4 默认即可作 GPIO/SPI 复用，永远不需要它**——Bsp/device/dap/bsp_dap.c 已彻底移除并留注释。
 - **[铁律] 遇到顽固 bug 必须调用 `engineering-method` skill（用户级 `~/.zcode/skills/engineering-method/`），不得凭惯性继续排查**。触发线（任一）：同一故障第 2 个假说死亡；开始怀疑 OS 补丁/硅级 bug/竞态/"玄学"等外因；"已排除"的结论被反复拿出来重审；修了真实缺陷但原始症状纹丝不动。触发后停止生产新假说，按 skill 的四条增量纪律执行：排除结论必须带覆盖清单、外因假说须机制或对照实验、修复≠根因（正交缺陷陷阱）、真值三源对照（规范表格/vendored 常量/真机抓包）。MS OS 2.0 免驱排查（根因 2 字节、疑点十几个、耗时数周）是其锚点案例，翻车详情见 skill 的 references。
 
 ## 约定
@@ -78,5 +79,5 @@ UniConnect：基于 CH32V305CCT6（RISC-V，主频 144MHz）的 CMSIS-DAP 调试
 - CAN 双路驱动 + CAN-USB 桥（WinUSB 复用双路）：已落地，双路 1000 帧回环全 PASS。
 - MS OS 2.0 免驱：根因（描述符类型字段违反规范表 9）已修，真机免驱绑定 WinUSB 验证 PASS。
 - **DAP bulk v2 通路已打通（2026-10-01）**：接口 2（"CMSIS-DAP"），OpenOCD 不接目标板可读完整 link 信息（v2/SWD/Atomic/FW 2.1.1/引脚状态），与 CAN 回归双绿。
-- DAP/SWD：**全链路已打通（2026-10-01 真机验证）**：SWD 引脚引擎 `Bsp/device/dap/bsp_dap.{c,h}`（SWCLK=PB3/SWDIO=PB5，GPIO 位拍为默认引擎 + `BSP_DAP_USE_SPI` 宏切换 SPI 单线半双工兼容后端供将来加速）；对 STM32F103C8T6 真机完成 DP/AP 全枚举（DPIDR=0x1BA01477，Cortex-M3 r1p1，6 断点 4 观察点）。注意 PB3/PB4 出厂复用为 JTDO/NJTRST，bsp_dap_init 里 SWJ_Disable 释放（SDI 烧录口实测不受影响）。WCH 版 openocd 的 target/*.cfg 有损坏的脚本搜索前缀（指向不存在的 `C:/MounRiver/MounRiver_Studio/...`），勿用 `-f target/stm32f1x.cfg`，用手工 DAP 声明：`openocd -c "adapter driver cmsis-dap" -c "transport select swd" -c "adapter speed 1000" -c "swd newdap stm32 dp -expected-id 0x1ba01477" -c "dap create stm32.dap -chain-position stm32.dp" -c "target create stm32.cpu cortex_m -dap stm32.dap" -c init`。
+- DAP/SWD：**全链路已打通（2026-10-01 真机验证）**：SWD 引脚引擎 `Bsp/device/dap/bsp_dap.{c,h}`（SWCLK=PB3/SWDIO=PB5，GPIO 位拍为**现役引擎**，有效 SWCLK ~5.3MHz）；对 STM32F103C8T6 真机完成 DP/AP 全枚举（DPIDR=0x1BA01477，Cortex-M3 r1p1，6 断点 4 观察点）。**全功能测试 PASS（同日）**：halt/resume/step、内核寄存器、RAM 读写回环、硬件断点（FPB 精确命中 Reset_Handler）、数据观察点（DWT 捕获 .data 写）、flash 读/全擦/编程/128KB 逐字节校验全循环、SWD 时钟 2/4/8MHz 全稳定（实测验证吞吐 59KiB/s@4MHz；DAP_THREAD_STACK 因此 1024→1536，压测水位 672B）。**SPI 加速暂存**：v1 板缺 MISO 桥接（全双工+串联电阻路线需 PB4 直连 SWDIO、PB5 经 ~1K 电阻），完整调查与 v2 恢复步骤见 `docs/spi-accel-swd-worklog.md`；引擎骨架与 `BSP_DAP_USE_SPI` 宏已在库。WCH 版 openocd 的 target/*.cfg 有损坏的脚本搜索前缀，勿用 `-f target/stm32f1x.cfg`，用手工 DAP 声明（命令已固化 tools/README.md）。
 - 下一步：SWD 深化（halt/读写内存/闪存算法）、DAP 加速引擎（SPI 后端）、CAN 接口改第二 CDC 量产路线评估。

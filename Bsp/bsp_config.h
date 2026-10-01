@@ -28,6 +28,8 @@
  *              注意SPI硬件MSB先移而SWD线序LSB先, 软件需位反转) */
 #define DAP_SWCLK_PIN      GPIO_Pin_3
 #define DAP_SWDIO_PIN      GPIO_Pin_5
+/* SPI加速暂存(v1板缺MISO桥接): 完整工作记录与v2恢复步骤见
+ * docs/spi-accel-swd-worklog.md。GPIO位拍实测上限约5.3MHz */
 #define BSP_DAP_USE_SPI    0
 
 /*!< mps usbfs: 64 */

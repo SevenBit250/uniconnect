@@ -33,7 +33,9 @@
  */
 #define DAP_THREAD_PRIORITY        11
 
-#define DAP_THREAD_STACK_SIZE      1024u
+/* 2026-10-01 SWD全功能压测(枚举/halt/寄存器/断点观察点/flash擦写回环)实测
+ * 高水位672B, 1024时利用率65%越报警线, SWD深化还会再深, 提至1536 */
+#define DAP_THREAD_STACK_SIZE      1536u
 
 /**
  * @brief CAN-USB桥接线程(协议引擎: 块池拼装/解析, 双路复用)
