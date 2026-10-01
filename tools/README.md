@@ -17,7 +17,8 @@
 | `cdc_baud_sweep.py` | 波特率全档位扫描（921600–9M），各档 64KB 并发分块回环，记录正确性与吞吐 | `python tools/cdc_baud_sweep.py [PORT]` |
 | `cdc_hammer.py` | 满载长锤：指定波特率/单轮字节数/轮数，字节级校验（性能边界验证用） | `python tools/cdc_hammer.py COM10 5000000 262144 5` |
 | `cdc_soak2h.py` | 四工况真实负载 soak（满载/小包高频/等差+sin+随机混合/超大），逐批 MD5 校验 + 魔法波特率计数器对账，结果写 `soak_result.txt`（gitignore） | `python tools/cdc_soak2h.py COM10 5000000 1800` |
-| `can_usb_test.py` | CAN-USB 桥双路回归：静默回环模式双路各 1000 帧 + 状态计数对账 | `python tools/can_usb_test.py` |
+| `can_usb_test.py` | CAN-USB 桥双路回归：静默回环模式双路各 N 帧 + 状态计数对账（不驱动总线，覆盖不了引脚/收发器） | `python tools/can_usb_test.py` |
+| `can_bus_test.py` | **真实总线回归（必跑）**：双通道正常模式经收发器对接，CH1↔CH2 双向发帧逐帧内容校验——唯一验证引脚映射/收发器/FIFO 路由的测试 | `python tools/can_bus_test.py [帧数] [波特率]` |
 | `can_loopback_read.py` | CAN 双路静默回环自测读数：两次快照取增量验证 tx==rx 且 err/drop==0 | `python tools/can_loopback_read.py [PORT] [间隔秒]` |
 
 DAP 通路：`openocd -c "adapter driver cmsis-dap" -c "transport select swd" -c "init" -c "cmsis-dap info" -c shutdown` 能读全 link 信息即 PASS。**SWD 目标调试**（勿用 `-f target/*.cfg`——WCH 版 openocd 脚本搜索前缀损坏，用手工 DAP 声明）：

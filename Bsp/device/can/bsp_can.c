@@ -280,13 +280,13 @@ static void can_tx_isr(uint8_t ch)
 }
 
 /* RX0中断: FIFO0挂起帧全部搬入接收环 */
-static void can_rx0_isr(uint8_t ch)
+static void can_rx_fifo_drain(uint8_t ch, uint8_t fifo)
 {
     can_chan_t *c = &can_chan[ch];
-    while (CAN_MessagePending(c->reg, CAN_FIFO0)) {
+    while (CAN_MessagePending(c->reg, fifo)) {
         can_frame_t f;
         CanRxMsg msg;
-        CAN_Receive(c->reg, CAN_FIFO0, &msg);
+        CAN_Receive(c->reg, fifo, &msg);
         f.flags = (msg.IDE == CAN_Id_Extended) ? CANF_IDE : 0;
         if (msg.RTR == CAN_RTR_Remote) f.flags |= CANF_RTR;
         f.dlc = msg.DLC & 0x0F;
@@ -299,7 +299,17 @@ static void can_rx0_isr(uint8_t ch)
             g_dbg.can_rx_drop++;
         }
     }
-    CAN_ClearITPendingBit(c->reg, CAN_IT_FMP0);
+}
+
+static void can_rx0_isr(uint8_t ch)
+{
+    /* 双FIFO收割: WCH bxCAN的FAFIFOR(FIFO关联)实测与STM32语义不符
+     * (真总线帧进FIFO1, 静默回环进FIFO0; FAFIFOR高位只读无法清零),
+     * 两手抓兼容任意路由(2026-10-01真总线排查实锤) */
+    can_rx_fifo_drain(ch, CAN_FIFO0);
+    can_rx_fifo_drain(ch, CAN_FIFO1);
+    CAN_ClearITPendingBit(can_chan[ch].reg, CAN_IT_FMP0);
+    CAN_ClearITPendingBit(can_chan[ch].reg, CAN_IT_FMP1);
     rt_sem_release(&can_activity_sem);
 }
 
@@ -401,8 +411,9 @@ static int can_hw_reconfig(uint8_t ch, uint32_t kbps, uint8_t mode)
         return -2;
     }
 
-    /* BTIMR: BRP[9:0] SJW[11:10] TS2[15:12] TS1[19:16] LBKM[30] SILM[31] */
-    uint32_t bt = (brp - 1) | (0u << 10) | (3u << 12) | (12u << 16);
+    /* BTIMR位段(厂商库CAN_Init同源): BRP[9:0] SJW[25:24] TS2[22:20] TS1[19:16] LBKM[30] SILM[31]
+     * 曾把TS2写在[15:12](无效保留位) → 硬件TS2实际=1tq, 时序劣化且与库初始化路径不一致 */
+    uint32_t bt = (brp - 1) | (0u << 24) | (3u << 20) | (12u << 16);
     if (mode == CAN_MODE_LOOPBACK_TEST) {
         bt |= (3u << 30);   /* SILM+LBKM */
     }
@@ -417,7 +428,7 @@ static int can_hw_reconfig(uint8_t ch, uint32_t kbps, uint8_t mode)
 
     CAN_ClearITPendingBit(CANx, CAN_IT_TME);
     CANx->RFIFO0 = CAN_RFIFO0_RFOM0;   /* 丢弃模式切换期间的陈旧接收 */
-    CANx->INTENR = CAN_IT_FMP0 | CAN_IT_TME;
+    CANx->INTENR = CAN_IT_FMP0 | CAN_IT_FMP1 | CAN_IT_TME;
     rt_hw_interrupt_enable(level);
 
     can_cur_mode[ch] = mode;
@@ -468,18 +479,20 @@ int bsp_can_init(uint8_t mode)
     rt_sem_init(&can_activity_sem, "can_act", 0, RT_IPC_FLAG_FIFO);
     can_timestamp_init();
 
-    RCC_APB2PeriphClockCmd(RCC_APB2Periph_AFIO | RCC_APB2Periph_GPIOB, ENABLE);
+    RCC_APB2PeriphClockCmd(RCC_APB2Periph_AFIO | RCC_APB2Periph_GPIOA | RCC_APB2Periph_GPIOB, ENABLE);
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_CAN1 | RCC_APB1Periph_CAN2, ENABLE);
 
-    /* CAN1: PB9=TX(AF_PP) PB8=RX(IPU), Remap1(PD0/PD1在48脚封装不存在) */
-    GPIO_PinRemapConfig(GPIO_Remap1_CAN1, ENABLE);
-    GPIO_InitStructure.GPIO_Pin = GPIO_Pin_9;
+    /* CAN1: 默认映射 PA12=TX(AF_PP) PA11=RX(IPU) -- v1板收发器布线(2026-10-01
+     * 真机核对); 曾误用Remap1(PB8/9), 静默回环不驱动总线故未暴露。USBHS在
+     * PB6/7无冲突。PD0/PD1(全重映射)在48脚封装不存在。CAN_REMAP复位值0
+     * 即默认映射, 勿写Remap(厂商库读改写会污染PCFR1其他位) */
+    GPIO_InitStructure.GPIO_Pin = GPIO_Pin_12;
     GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF_PP;
     GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
-    GPIO_Init(GPIOB, &GPIO_InitStructure);
-    GPIO_InitStructure.GPIO_Pin = GPIO_Pin_8;
+    GPIO_Init(GPIOA, &GPIO_InitStructure);
+    GPIO_InitStructure.GPIO_Pin = GPIO_Pin_11;
     GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IPU;
-    GPIO_Init(GPIOB, &GPIO_InitStructure);
+    GPIO_Init(GPIOA, &GPIO_InitStructure);
 
     /* CAN2: PB13=TX PB12=RX(固定映射) */
     GPIO_InitStructure.GPIO_Pin = GPIO_Pin_13;
@@ -556,8 +569,8 @@ int bsp_can_init(uint8_t mode)
     NVIC_InitStructure.NVIC_IRQChannel = TIM3_IRQn;
     NVIC_Init(&NVIC_InitStructure);
 
-    CAN_ITConfig(CAN1, CAN_IT_FMP0 | CAN_IT_TME, ENABLE);
-    CAN_ITConfig(CAN2, CAN_IT_FMP0 | CAN_IT_TME, ENABLE);
+    CAN_ITConfig(CAN1, CAN_IT_FMP0 | CAN_IT_FMP1 | CAN_IT_TME, ENABLE);
+    CAN_ITConfig(CAN2, CAN_IT_FMP0 | CAN_IT_FMP1 | CAN_IT_TME, ENABLE);
     return 0;
 }
 

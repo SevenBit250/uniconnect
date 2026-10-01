@@ -58,7 +58,7 @@ UniConnect：基于 CH32V305CCT6（RISC-V，主频 144MHz）的 CMSIS-DAP 调试
 - **复合模式接口注册顺序必须与描述符一致**：usbd_add_interface 按注册序分配 intf_num；CAN 曾前置抢 0 号，Windows 给 CDC 接口 0 的类请求被路由到无处理器的 CAN 接口 → STALL → usbser 打开报错 31（"设备没有发挥作用"）。
 - **WCH-Link DAP模式(WinUSB)在本机正常的真相: 不走MS OS, 走WCH签名INF驱动包**。WCH-LinkUtility/MRS安装时装入 WCHLinkWDM.INF(oem54.inf, WCH的EV证书签名), 按硬件ID `USB\VID_1A86&PID_8012&MI_00` 精确匹配后绑WinUSB。**WCH自家产品都不依赖MS OS 2.0免驱**。UniConnect量产路线决策: CAN接口改第二CDC(usbser全平台inbox零驱动, 二进制协议不变), DAP走HID v1+bulk v2双接口; MS OS描述符保留但非依赖项。
 - **MS OS 2.0 免驱失败的根因（2026-10-01 已修）**：描述符集两个类型字段违反 MS 规范表 9——集合头 `wDescriptorType` 误为 0x0006（=Model ID，规范固定 22B，我们 10B，长度校验失败）、功能子集头误为 0x0008（=Vendor Revision，未定义用途）。正确值：**集合头 0x0000 / 配置子集 0x01 / 功能子集 0x02 / 兼容ID 0x03 / 注册表属性 0x04**（见 CherryUSB `common/usb_def.h` 288-295 行与微软规范 Table 9）。Windows 按 Model ID 解析失败后整集判废 → 枚举在 BOS 后中止（SET_CONFIG 不发、字符串不读、usbccgp 1ms 内 STATUS_NO_SUCH_DEVICE）——与 ETW 观测完全吻合。此前"描述符内容已排除"结论错误（当时只核对了长度/UUID/GUID，漏了类型值）；KB5124008 补丁时间线是巧合。历史排查中 EP0 多包 bug、ISR 竞态、watchdog 基址、注册顺序、stale object 等修复均为真实缺陷，保留。**真机验证 PASS（2026-10-01）**：接口 2 `Service=WINUSB`、兼容 ID `USB\MS_COMP_WINUSB`，双路 CAN 1000 帧回环全 PASS（`tools/can_usb_test.py`，PID 0x0218）。调试期曾用 PID 0x0220 隔离 Windows 设备缓存，验证后已恢复生产 PID。
-- CAN（2026-09-29 双路驱动起来）：**CH32V30x CAN 为 bxCAN 架构，RM 第 24 章无 DMA 请求线**——用 FIFO0 FMP 中断收帧 + TX 空中断续装邮箱（帧环 SPSC），每帧 ISR 约 4 次寄存器读，1M 波特率满载 ~8k 帧/s 时 ISR 占用 <2%。**WCH 库 `CAN_Init` 成功返回 1 失败返回 0（STM32 风格），不能按真值判断**（曾因 `if(ret)` 把成功当失败在 CAN1 后早退）。库内含特定封装的出厂自检路径（APB1 复位脉冲 + 4Mbps 静默回环自测帧）。引脚：CAN1=PB8/PB9（Remap1，PD0/PD1 在 48 脚不存在）、CAN2=PB12/PB13（固定）。APB1=72MHz（PPRE1_DIV2），1M 波特率 = P4 × 18tq（SJW1+BS1_13tq+BS2_4tq，采样点 77.8%）。`CAN_FilterInit` 只收一个参数（无 CANx，bank 序号决定归属，`CAN_SlaveStartBank` 切分 28 组 bank）。回环自测模式 `CAN_Mode_Silent_LoopBack` 不驱动总线。
+- CAN（2026-10-01 真实总线打通）：**引脚：CAN1=PA12(TX)/PA11(RX)（默认映射，v1 板布线实锚；曾误用 Remap1=PB8/9，静默回环不驱动总线故从未暴露）、CAN2=PB13(TX)/PB12(RX)（固定）**。bxCAN 无 DMA 请求线——FMP 中断收帧 + TX 空中断续装。APB1=72MHz，1M 波特率 = P4 × 18tq。**BTIMR 位段按厂商库：BRP[9:0] SJW[25:24] TS2[22:20] TS1[19:16]**（曾把 TS2 写在 [15:12] 无效位）。**WCH bxCAN 真总线帧实测进 FIFO1 而非 FIFO0**（FAFIFOR 与 STM32 语义不符且高位只读）——固件双 FIFO 收割 + FMP0/FMP1 双中断。`CAN_FilterInit` 只收一个参数（bank 序号决定归属，`CAN_SlaveStartBank` 切分 28 组 bank）。WCH 库 `CAN_Init` 成功返回 1。**静默回环自测覆盖不了引脚映射与 FIFO 路由——真总线测试 `tools/can_bus_test.py`（正常模式双通道对接）是 CAN 回归必跑项**。收发器 SN65HVD251，总线 60Ω 终端。
 
 ## 开发铁律
 
@@ -76,7 +76,7 @@ UniConnect：基于 CH32V305CCT6（RISC-V，主频 144MHz）的 CMSIS-DAP 调试
 ## 当前进度（2026-10）
 
 - CDC↔UART 双向块缓冲零拷贝：已落地，921600–9M 全档位零丢失（回归 11/11 PASS）。
-- CAN 双路驱动 + CAN-USB 桥（WinUSB 复用双路）：已落地，双路 1000 帧回环全 PASS。
+- CAN 双路驱动 + CAN-USB 桥（WinUSB 复用双路）：已落地，**真实总线双向千帧零丢失（can_bus_test.py）+ 静默自测双 PASS**。
 - MS OS 2.0 免驱：根因（描述符类型字段违反规范表 9）已修，真机免驱绑定 WinUSB 验证 PASS。
 - **DAP bulk v2 通路已打通（2026-10-01）**：接口 2（"CMSIS-DAP"），OpenOCD 不接目标板可读完整 link 信息（v2/SWD/Atomic/FW 2.1.1/引脚状态），与 CAN 回归双绿。
 - DAP/SWD：**全链路已打通（2026-10-01 真机验证）**：SWD 引脚引擎 `Bsp/device/dap/bsp_dap.{c,h}`（SWCLK=PB3/SWDIO=PB5，GPIO 位拍为**现役引擎**，有效 SWCLK ~5.3MHz）；对 STM32F103C8T6 真机完成 DP/AP 全枚举（DPIDR=0x1BA01477，Cortex-M3 r1p1，6 断点 4 观察点）。**全功能测试 PASS（同日）**：halt/resume/step、内核寄存器、RAM 读写回环、硬件断点（FPB 精确命中 Reset_Handler）、数据观察点（DWT 捕获 .data 写）、flash 读/全擦/编程/128KB 逐字节校验全循环、SWD 时钟 2/4/8MHz 全稳定（实测验证吞吐 59KiB/s@4MHz；DAP_THREAD_STACK 因此 1024→1536，压测水位 672B）。**SPI 加速暂存**：v1 板缺 MISO 桥接（全双工+串联电阻路线需 PB4 直连 SWDIO、PB5 经 ~1K 电阻），完整调查与 v2 恢复步骤见 `docs/spi-accel-swd-worklog.md`；引擎骨架与 `BSP_DAP_USE_SPI` 宏已在库。WCH 版 openocd 的 target/*.cfg 有损坏的脚本搜索前缀，勿用 `-f target/stm32f1x.cfg`，用手工 DAP 声明（命令已固化 tools/README.md）。
