@@ -23,16 +23,14 @@ extern bsp_uart_buffer_t uart_handle;
 extern bsp_usb_cdc_buffer_t cdc_handle;
 // cdc行设置
 static struct cdc_line_coding lincoding;
-// 工作线程
+// 工作线程(tx发送/rx接收/ctrl线控; LED已并入monitor统一管理)
 static struct rt_thread cdc_tx_thread;
 static struct rt_thread cdc_rx_thread;
 static struct rt_thread cdc_ctrl_thread;
-static struct rt_thread cdc_sta_led_thread;
 // 工作线程栈
 ALIGN(RT_ALIGN_SIZE) static char cdc_tx_stack[CDC_TX_THREAD_STACK_SIZE];
 ALIGN(RT_ALIGN_SIZE) static char cdc_rx_stack[CDC_RX_THREAD_STACK_SIZE];
 ALIGN(RT_ALIGN_SIZE) static char cdc_ctrl_stack[CDC_CTRL_THREAD_STACK_SIZE];
-ALIGN(RT_ALIGN_SIZE) static char cdc_sta_led_stack[CDC_STA_LED_THREAD_STACK_SIZE];
 
 // 在途跟踪: 线控reset时作为例外保留, 由各自完成路径归还
 static uart_rx_desc_t cdc_tx_inflight;                 // USB IN在途(uart->usb), staged暂存槽
@@ -174,11 +172,9 @@ void cdc_rx_thread_entry(void *param)
                 bsp_usb_cdc_rx_recycle(block);
                 continue;
             }
-            cdc_handle.uart_tx_working = RT_TRUE;
             cdc_uart_tx_block = block;
             bsp_uart_write_by_dma(block, len);
             bsp_uart_wait_dma_write_completed();
-            cdc_handle.uart_tx_working = RT_FALSE;
             cdc_uart_tx_block = RT_NULL;
             bsp_usb_cdc_rx_recycle(block);
             bsp_usb_cdc_rx_try_resume();
@@ -217,32 +213,9 @@ void cdc_ctrl_thread_entry(void *param)
         }
         // 重置发送状态
         cdc_handle.tx_buffer_empty = RT_TRUE;
-        cdc_handle.uart_tx_working = RT_FALSE;
-        cdc_handle.uart_rx_working = RT_FALSE;
-        // 允许传输
         cdc_handle.allow_transfer = RT_TRUE;
-        // 亮起uart指示灯
-        for(uint8_t i = 0; i < 2; i++) {
-            bsp_led_ctrl(BSP_LED_ID_COM_STA, 1);
-            rt_thread_mdelay(50);
-            bsp_led_ctrl(BSP_LED_ID_COM_STA, 0);
-            rt_thread_mdelay(50);
-        }
-    }
-}
-
-void cdc_sta_led_thread_entry(void *param)
-{
-    while (1) {
-        rt_thread_mdelay(1);
-        if (cdc_handle.allow_transfer == RT_FALSE) {
-            continue;
-        }
-        if (!(cdc_handle.uart_tx_working || cdc_handle.uart_rx_working)) {
-            bsp_led_ctrl(BSP_LED_ID_COM_STA, 0);
-            continue;
-        }
-        bsp_led_toggle(BSP_LED_ID_COM_STA);
+        // LED确认双闪请求(monitor线程执行, ctrl不再直接碰LED)
+        cdc_handle.led_blink_req = 2;
     }
 }
 
@@ -289,22 +262,11 @@ int cdc_uart_thread_init(void)
                    CDC_CTRL_THREAD_PRIORITY,
                    rt_tick_from_millisecond(1));
 
-    rt_thread_init(&cdc_sta_led_thread,
-                   "cdc_sta",
-                   cdc_sta_led_thread_entry,
-                   RT_NULL,
-                   &cdc_sta_led_stack[0],
-                   sizeof(cdc_sta_led_stack),
-                   CDC_STA_LED_THREAD_PRIORITY,
-                   rt_tick_from_millisecond(1));
-
     rt_thread_startup(&cdc_tx_thread);
 
     rt_thread_startup(&cdc_rx_thread);
 
     rt_thread_startup(&cdc_ctrl_thread);
-
-    rt_thread_startup(&cdc_sta_led_thread);
 
     return 0;
 }

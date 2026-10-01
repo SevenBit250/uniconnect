@@ -15,7 +15,7 @@ UniConnect：基于 CH32V305CCT6（RISC-V，主频 144MHz）的 CMSIS-DAP 调试
 ## 目录与分层（自上而下只允许向下依赖）
 
 - `User/` — `main()` 仅空循环，系统状态机（`system_status_t`，main.h）；`config.h` 集中定义各线程优先级与栈大小；中断处理在 `ch32v30x_it.c`。
-- `App/` — RT-Thread 线程层：`cdc_uart_thread.c`（CDC↔UART 双向块缓冲零拷贝桥，tx/rx/ctrl/LED 四线程）、`dap_thread.c`（CMSIS-DAP 命令泵，USB 请求/响应队列）、`monitor_thread.c`（按系统状态驱动 LED 动画）、`app_entry.c`（`INIT_APP_EXPORT` 自启动入口）。
+- `App/` — RT-Thread 线程层：`cdc_uart_thread.c`（CDC↔UART 双向块缓冲零拷贝桥，tx/rx/ctrl 三线程）、`dap_thread.c`（CMSIS-DAP 命令泵，USB 请求/响应队列）、`monitor_thread.c`（统一 LED 管理 + 看门狗：SYS 心跳/流水、COM/CAN1/CAN2 吞吐活动灯按 g_dbg 计数器 10ms 轮询最小亮 30ms、线控确认双闪，数据路径零 LED 代码）、`app_entry.c`（空壳，曾为 SWD 占位线程已删）。
 - `Bsp/` — 硬件抽象层，App 只准通过 `bsp_led_*` / `bsp_uart_*` / `bsp_usb_*` API 访问硬件，不直接调外设库。`Bsp/bsp_pool.{h,c}` 是通用块缓冲池组件（FREE→LANDING→READY→OUT 状态机，关中断临界区内只做索引运算）；UART RX 与 CDC OUT 两条高速通路的数据缓冲全部走它，块首恒 4 字节对齐。`bsp_config.h` 定义 USB 端点地址（DAP_IN 0x81 / DAP_OUT 0x02 / CDC_IN 0x82 / CDC_OUT 0x04）、VID/PID (0x0D28/0x0218) 及两个块池的块尺寸/池深。
 - `Dap/` — CMSIS-DAP 官方源码（DAP.c/SW_DP.c/DAP_queue.c 等），硬件相关全部在 `DAP_config.h`（CPU_CLOCK=144MHz，SWD/JTAG 引脚映射）。
 - `CherryUSB/` — vendored 的 CherryUSB v1.51 协议栈（非子模块，可直接改），CH32 移植层在 `port/ch32/ch32hs/`，通过 `osal/` 对接 RT-Thread。
@@ -42,7 +42,7 @@ UniConnect：基于 CH32V305CCT6（RISC-V，主频 144MHz）的 CMSIS-DAP 调试
 - **波特率切换必须原子**（ctrl 线程内关中断完成 USART_Init+双向池重建，`bsp_uart_rx_reset` 同时清残留 HT/TC 标志）。
 - **线程栈须容纳落在其上的中断 C 调用帧**（-O0 帧很大）：idle 栈 256B 必炸（已设 4096）；`RT_MAIN_THREAD_STACK_SIZE` 不得超过堆容量（board.c 静态 rt_heap），否则主线程创建失败=系统启动残废（现象：USB 不枚举）。
 - **start_write 失败必须回滚 `tx_buffer_empty`**，否则方向 A 永久死锁。满 512 块必须发 ZLP——Windows usbser 只在传输边界完成读取（去掉 ZLP 数据滞留驱动不投递）。
-- **调试设施**：`g_dbg` 全链路计数器（魔法波特率 1234567 经 CDC IN 返回 84B 快照）；`bsp_watchdog` 金丝雀+OUT DMA 指向校验（monitor 线程）；PMP 诱捕代码骨架已验证可用（保护诱饵区可抓 CPU 写者 PC，DMA 写者不触发）。
+- **调试设施**：`g_dbg` 全链路计数器（魔法波特率 1234567 经 CDC IN 返回 84B 快照）；`bsp_watchdog` 金丝雀+OUT DMA 指向校验（monitor 线程）；`tools/stack_watermark.py` 线程栈水位检测（'#'预填单调保持，事后扫描等价实时，改栈配置后必跑）；PMP 诱捕代码骨架已验证可用（保护诱饵区可抓 CPU 写者 PC，DMA 写者不触发）。
 - **Windows usbser 主机侧行为**：单笔大写 pending 期间饿死读（测试须分块写+低波特率加 10ms 节奏）；数据完整性与设备无关。
 - **性能边界（2026-09-29 RM 精读后突破）**：**921600–9M（UART 理论极限）全档位零丢失**（256KB×5 满载锤 + 5M 1MB×10 / 9M 1MB×8 soak + 回归 11/11 全 PASS，9M 实测 833KB/s 线速）。关键修复：RM `RB_UC_INT_BUSY`（USB_CTRL bit3，CherryUSB/EVT 本就置位）语义是"TRANSFER 标志置位期间 SIE 自动 NAK 所有新事务"——但 ISR 入口提前清标志使保护失效，处理当前 OUT 包期间下一个背靠背包被 ACK 进**未换出的旧 RX 缓冲**覆写正在消费的数据（HS 包间隔 µs 级才触发，FS 300µs+ 不触发，故此前误判为硅级竞态）。正确做法：**INT_ST 先快照（NAK 重试会刷新它），TRANSFER 标志清除必须放在端点重武装之后（ISR 体末尾）**，见 `usb_dc_usbhs.c` USBD_IRQHandler。此前"4M/5M 硅级极限"结论作废。usbser 写侧全量到达（WriteFile 无短写无异常，分层排除法完整记录于提交历史）。
 - **测试方法论**：Windows usbser 应用层读满即停+下轮 purge 会丢迟到尾巴（测试须累计流比对）；单笔大写饿死读（分块写+低速档 10ms 节奏）；每 512 倍数传输必须 ZLP 否则主机不投递。

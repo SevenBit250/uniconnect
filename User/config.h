@@ -7,22 +7,25 @@
  */
 #define MONITOR_THREAD_PRIORITY             22
 
-#define MONITOR_THREAD_STACK_SIZE           256u
+/* monitor兼统一LED管理(看门狗+SYS心跳+吞吐活动灯+确认双闪), 调用链浅 */
+#define MONITOR_THREAD_STACK_SIZE           1024u
 
 /**
  * @brief CDC服务线程优先级和线程栈配置
- * 
+ *
  */
 #define CDC_TX_THREAD_PRIORITY             10
 #define CDC_RX_THREAD_PRIORITY             10
 #define CDC_CTRL_THREAD_PRIORITY           9
-#define CDC_STA_LED_THREAD_PRIORITY        21
 
-/* 线程栈需容纳线程自身调用链 + 落在其上的中断C调用帧(-O0帧很大) */
-#define CDC_TX_THREAD_STACK_SIZE           4096u
-#define CDC_RX_THREAD_STACK_SIZE           4096u
-#define CDC_CTRL_THREAD_STACK_SIZE         4096u
-#define CDC_STA_LED_THREAD_STACK_SIZE      512u
+/* 线程栈需容纳线程自身调用链 + 落在其上的中断C调用帧(-O0帧很大)。
+ * 2026-10-01栈整治: 4096(危机夜f978ad9恐慌值)按实测高水位收敛至1024。
+ * 依据5M四工况soak实测(tx/rx/ctrl=508/508/240B, 轮次间有±50B抖动,
+ * 768时rx曾达66%利用率越报警线, 1024=2x实测最坏值)。含中断帧。
+ * 验证手段: tools/stack_watermark.py('#'预填栈水位单调保持, 改栈后必复测) */
+#define CDC_TX_THREAD_STACK_SIZE           1024u
+#define CDC_RX_THREAD_STACK_SIZE           1024u
+#define CDC_CTRL_THREAD_STACK_SIZE         1024u
 
 /**
  * @brief DAP服务线程优先级和线程栈配置

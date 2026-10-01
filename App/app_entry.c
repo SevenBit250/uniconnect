@@ -1,35 +1,6 @@
-#include "main.h"
-#include "ch32v30x.h"
-#include <rtthread.h>
+/* 本文件曾是 SWD 占位线程(swd_thread)的自启动入口(2026-10-01 清理删除)。
+ * SWD/DAP 的工作全部由 App/dap_thread.c 的命令泵线程承担, 空占位线程
+ * (1KB栈+静态TCB, 当年内存紧张期净占1.2KB)已无意义。
+ * 文件保留为空壳以免 MRS 工程源列表变动, 新的 App 层自启动逻辑可放此处。 */
 
-
-ALIGN(RT_ALIGN_SIZE)
-static char swd_thread_stack[1024];
-static struct rt_thread swd_thread;
-static void swd_thread_entry(void *param);
-
-static int app_entry(void)
-{
-    /* 初始化swd线程 */
-    rt_thread_init(&swd_thread,
-                   "swd_thread",
-                   swd_thread_entry,
-                   RT_NULL,
-                   &swd_thread_stack[0],
-                   sizeof(swd_thread_stack),
-                   20, 
-                   rt_tick_from_millisecond(1));
-    rt_thread_startup(&swd_thread);
-
-    return 0;
-}
-INIT_APP_EXPORT(app_entry);
-
-/* 线程2入口 */
-static void swd_thread_entry(void *param)
-{
-    while (1) {
-        rt_thread_mdelay(1000);
-        // GPIO_WriteBit(SYS_STA_Port, SYS_STA_Pin, !GPIO_ReadOutputDataBit(SYS_STA_Port, SYS_STA_Pin));
-    }
-}
+typedef int app_entry_placeholder_t;   /* 空翻译单元占位 */

@@ -15,8 +15,7 @@ typedef struct {
     bsp_pool_t rx_out_pool;                          // CDC OUT块缓冲池
     rt_bool_t tx_buffer_empty;                       // USB IN方向无在途发送
     rt_bool_t allow_transfer;                        // 允许数据传输(线控已配置)
-    rt_bool_t uart_tx_working;                       // UART TX工作中(LED指示)
-    rt_bool_t uart_rx_working;                       // UART RX工作中(LED指示)
+    volatile uint8_t led_blink_req;                  // LED确认双闪请求(monitor线程消费)
     struct rt_semaphore data_ready_sem;              // CDC OUT数据就绪信号量(块已提交)
     struct rt_semaphore lincoding_sem;               // 设备配置信号量
     struct usbd_endpoint in_ep;
@@ -41,6 +40,7 @@ typedef struct {
 } bsp_usb_can_buffer_t;
 
 extern bsp_usb_can_buffer_t canusb_handle;
+extern bsp_usb_cdc_buffer_t cdc_handle;
 
 int bsp_can_usb_ep_start_write(uint8_t busid, const uint8_t *data, uint32_t data_len);
 int bsp_can_usb_get_mps(void);
