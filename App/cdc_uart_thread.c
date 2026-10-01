@@ -12,11 +12,13 @@
  *   usb->uart: cdc_rx_thread取块直发UART DMA, 发完归还+续读
  */
 #include "config.h"
+#include "bsp_config.h"
 #include "usbd_core.h"
 #include "usbd_cdc_acm.h"
 #include "rtthread.h"
 #include "rthw.h"
 #include "bsp.h"
+#include "bsp_watchdog.h"
 
 // cdc和uart句柄
 extern bsp_uart_buffer_t uart_handle;
@@ -40,6 +42,114 @@ static volatile uint8_t *cdc_uart_tx_block = RT_NULL;  // UART TX在途(usb->uar
 
 /***************************************************************************/
 /*                                                                         */
+/*                cdc out(usb->uart)块缓冲池数据面 (2026-10-01              */
+/*                由bsp_usb.c移入, USB落块零拷贝交接UART DMA)               */
+/*                                                                         */
+/*  USB OUT DMA直接落块, 块满/短包即提交, UART侧pop取块发DMA,               */
+/*  发完recycle归还; 池耗尽则不挂端点(硬件NAK背压), recycle后重挂            */
+/***************************************************************************/
+
+/* out池: 块首恒4字节对齐, 直接作为OUT端点DMA落点 */
+static __attribute__((aligned(4))) uint8_t cdc_out_pool_storage[USB_CDC_OUT_BLOCK_SIZE * USB_CDC_OUT_BLOCK_COUNT];
+static volatile uint8_t *cdc_out_landing = RT_NULL;    // 当前OUT落块
+static volatile uint8_t cdc_out_paused = 0;            // 池耗尽, OUT端点未挂(NAK)
+
+/* 挂OUT端点读一块 (关中断内或USB ISR上下文调用) */
+static void cdc_out_arm(uint8_t *block)
+{
+    cdc_out_landing = block;
+    usbd_ep_start_read(0, CDC_OUT_EP, block, USB_CDC_OUT_BLOCK_SIZE);
+}
+
+/* USB OUT完成(块满或短包): 提交旧块, 换新块续收; 池耗尽则挂起 (USB ISR上下文) */
+static void cdc_out_done(uint16_t nbytes)
+{
+    g_dbg.out_done++;
+    g_dbg.out_bytes += nbytes;
+    if (nbytes == 0) {
+        /* 主机ZLP: 无数据, 原块重挂端点, 不提交不唤醒 */
+        g_dbg.out_zlp++;
+        cdc_out_arm((uint8_t *)cdc_out_landing);
+        return;
+    }
+    bsp_pool_submit(&cdc_handle.rx_out_pool, (uint8_t *)cdc_out_landing, nbytes);
+    uint8_t *next = bsp_pool_acquire(&cdc_handle.rx_out_pool);
+    if (next != RT_NULL) {
+        cdc_out_arm(next);
+    } else {
+        cdc_out_paused = 1;
+        g_dbg.out_pause++;
+    }
+    rt_sem_release(&cdc_handle.data_ready_sem);
+}
+
+static void cdc_out_bulk_out(uint8_t busid, uint8_t ep, uint32_t nbytes)
+{
+    (void)busid;
+    (void)ep;
+    cdc_out_done((uint16_t)nbytes);
+}
+
+static uint8_t cdc_out_pop(uint8_t **block, uint16_t *len)
+{
+    return bsp_pool_pop(&cdc_handle.rx_out_pool, block, len);
+}
+
+static void cdc_out_recycle(uint8_t *block)
+{
+    bsp_pool_recycle(&cdc_handle.rx_out_pool, block);
+}
+
+static void cdc_out_try_resume(void)
+{
+    rt_base_t level = rt_hw_interrupt_disable();
+    if (cdc_out_paused) {
+        uint8_t *next = bsp_pool_acquire(&cdc_handle.rx_out_pool);
+        if (next != RT_NULL) {
+            cdc_out_arm(next);
+            cdc_out_paused = 0;
+            g_dbg.out_resume_ok++;
+        } else {
+            g_dbg.out_resume_fail++;
+        }
+    }
+    rt_hw_interrupt_enable(level);
+}
+
+/* 重建OUT池并重挂端点(CONFIGURED/线控切换/USB复位时调用) */
+static void cdc_out_reset(uint8_t *uart_inflight)
+{
+    rt_base_t level = rt_hw_interrupt_disable();
+    uint8_t *except[1];
+    uint8_t except_n = 0;
+    if (uart_inflight != RT_NULL) {
+        except[0] = uart_inflight;
+        except_n = 1;
+    }
+    bsp_pool_reset(&cdc_handle.rx_out_pool, except, except_n);
+    uint8_t *first = bsp_pool_acquire(&cdc_handle.rx_out_pool);
+    if (first != RT_NULL) {
+        cdc_out_arm(first);
+        cdc_out_paused = 0;
+    } else {
+        cdc_out_paused = 1;
+    }
+    rt_hw_interrupt_enable(level);
+}
+
+/* cdc in(uart->usb)发送 */
+static int cdc_in_start_write(uint8_t busid, const uint8_t *data, uint32_t data_len)
+{
+    return usbd_ep_start_write(busid, CDC_IN_EP, data, data_len);
+}
+
+static int cdc_in_get_mps(void)
+{
+    return USB_CDC_OUT_BLOCK_SIZE;
+}
+
+/***************************************************************************/
+/*                                                                         */
 /*                           CherryUSB 回调                                 */
 /*                                                                         */
 /***************************************************************************/
@@ -51,6 +161,12 @@ void cdc_uart_event_handler(uint8_t busid, uint8_t event)
             cdc_handle.allow_transfer = RT_FALSE;
             break;
         case USBD_EVENT_CONFIGURED:
+            /* 数据面自愈: 重建OUT池并重挂首块(总线复位重枚举后) */
+            cdc_out_reset(RT_NULL);
+            /* OUT DMA指向监护在端点真正武装后才启用(枚举前寄存器可能残留
+             * 上一会话旧地址, 过早开监护会误杀monitor -- 实测踩坑) */
+            bsp_watchdog_guard_out_ep(CDC_OUT_EP & 0x0F, (uint32_t)cdc_out_pool_storage,
+                                      USB_CDC_OUT_BLOCK_SIZE * USB_CDC_OUT_BLOCK_COUNT);
             /* Windows在打开串口/错误恢复时会发USB总线复位, 复位后不会再发
              * 线控变更(set_line_coding被memcmp去重), allow_transfer会永久关闭.
              * 已有有效线控时释放信号量, 由ctrl线程重建串口/双向池并重新放行 */
@@ -74,17 +190,17 @@ void cdc_uart_acm_bulk_in (uint8_t busid, uint8_t ep, uint32_t nbytes)
         bsp_uart_rx_release(&cdc_tx_inflight);
         g_dbg.in_recycle++;
     }
-    if (nbytes && (nbytes % bsp_usb_cdc_get_mps()) == 0) {
+    if (nbytes && (nbytes % cdc_in_get_mps()) == 0) {
         /* 满512整块必须发ZLP: 主机usbser只在传输边界(短包)完成读取,
          * 不发ZLP数据会滞留在主机驱动里不投递 */
         g_dbg.in_zlp++;
-        bsp_usb_cdc_ep_start_write(busid, NULL, 0);
+        cdc_in_start_write(busid, NULL, 0);
     } else if (bsp_uart_rx_pop_coalesce(&d) || (bsp_uart_rx_drain(0), bsp_uart_rx_pop_coalesce(&d))) {
         /* pop空时主动收割一次再取(贪心发送, 不等里程碑中断) */
         g_dbg.in_pop++;
         cdc_tx_inflight = d;
         cdc_tx_inflight_valid = 1;
-        int ret = bsp_usb_cdc_ep_start_write(busid, d.ptr, d.len);
+        int ret = cdc_in_start_write(busid, d.ptr, d.len);
         if (ret != 0) {
             /* 发起失败必须回滚, 否则永远等不到bulk_in而永久死锁 */
             g_dbg.in_write_err++;
@@ -141,7 +257,7 @@ void cdc_tx_thread_entry(void *param)
             cdc_handle.tx_buffer_empty = RT_FALSE;
             cdc_tx_inflight = d;
             cdc_tx_inflight_valid = 1;
-            int ret = bsp_usb_cdc_ep_start_write(0, d.ptr, d.len);
+            int ret = cdc_in_start_write(0, d.ptr, d.len);
             if (ret != 0) {
                 g_dbg.in_write_err++;
                 g_dbg.in_write_ret = (uint32_t)ret;
@@ -166,18 +282,18 @@ void cdc_rx_thread_entry(void *param)
             continue;
         }
 
-        while (bsp_usb_cdc_rx_pop(&block, &len)) {
+        while (cdc_out_pop(&block, &len)) {
             if (len == 0) {
                 /* 防御: 空块直接归还 */
-                bsp_usb_cdc_rx_recycle(block);
+                cdc_out_recycle(block);
                 continue;
             }
             cdc_uart_tx_block = block;
             bsp_uart_write_by_dma(block, len);
             bsp_uart_wait_dma_write_completed();
             cdc_uart_tx_block = RT_NULL;
-            bsp_usb_cdc_rx_recycle(block);
-            bsp_usb_cdc_rx_try_resume();
+            cdc_out_recycle(block);
+            cdc_out_try_resume();
 
             if (cdc_handle.allow_transfer == RT_FALSE) {
                 break;
@@ -197,7 +313,7 @@ void cdc_ctrl_thread_entry(void *param)
             cdc_handle.allow_transfer = RT_TRUE;
             if (cdc_handle.tx_buffer_empty) {
                 cdc_handle.tx_buffer_empty = RT_FALSE;
-                bsp_usb_cdc_ep_start_write(0, snap, sizeof(bsp_dbg_t));
+                cdc_in_start_write(0, snap, sizeof(bsp_dbg_t));
             }
             continue;
         }
@@ -208,7 +324,7 @@ void cdc_ctrl_thread_entry(void *param)
             rt_base_t level = rt_hw_interrupt_disable();
             bsp_uart_config (lincoding.dwDTERate, lincoding.bCharFormat, lincoding.bParityType);
             bsp_uart_rx_reset();
-            bsp_usb_cdc_rx_reset((uint8_t *)cdc_uart_tx_block);
+            cdc_out_reset((uint8_t *)cdc_uart_tx_block);
             rt_hw_interrupt_enable(level);
         }
         // 重置发送状态
@@ -227,8 +343,16 @@ void cdc_ctrl_thread_entry(void *param)
 
 int cdc_uart_env_init(void)
 {
+    /* 向下注册(早于bsp_usb层INIT_ENV的usbd_initialize): 端点/回调/事件钩子 */
+    cdc_handle.in_ep.ep_addr = CDC_IN_EP;
+    cdc_handle.out_ep.ep_addr = CDC_OUT_EP;
     cdc_handle.in_ep.ep_cb = cdc_uart_acm_bulk_in;
+    cdc_handle.out_ep.ep_cb = cdc_out_bulk_out;
     cdc_handle.cdc_event_hander_callback = cdc_uart_event_handler;
+    /* CDC数据面自有资源 */
+    rt_sem_init(&cdc_handle.data_ready_sem, "cdc_rx", 0, RT_IPC_FLAG_FIFO);
+    rt_sem_init(&cdc_handle.lincoding_sem, "cdc_ctl", 0, RT_IPC_FLAG_FIFO);
+    bsp_pool_init(&cdc_handle.rx_out_pool, cdc_out_pool_storage, USB_CDC_OUT_BLOCK_SIZE, USB_CDC_OUT_BLOCK_COUNT);
     return 0;
 }
 INIT_COMPONENT_EXPORT(cdc_uart_env_init);

@@ -10,7 +10,7 @@ BOS wMSOSDescriptorSetTotalLength 与集合 wTotalLength 不同步), 肉眼对�
 import re
 import sys
 
-SRC = "Bsp/src/bsp_usb.c"
+SRC = "Bsp/device/usb/bsp_usb.c"
 
 def extract_array(name):
     text = open(SRC, encoding="utf-8", errors="replace").read()

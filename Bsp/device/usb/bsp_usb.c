@@ -1,280 +1,25 @@
 #include "usbd_core.h"
 #include "usbd_cdc_acm.h"
 #include "bsp_usb.h"
-#include "bsp_pool.h"
 #include "bsp_config.h"
 #include "main.h"
-#include <rthw.h>
-
-
+#include <string.h>
 
 /***************************************************************************/
 /*                                                                         */
-/*                          cdc out(usb->uart)块缓冲池                     */
+/*                     USB设备层: 描述符表+复合组装+事件分发                  */
 /*                                                                         */
-/*                                                                         */
-/*  USB OUT DMA直接落块, 块满/短包即提交, UART侧pop取块发DMA,               */
-/*  发完recycle归还; 池耗尽则不挂端点(硬件NAK背压), recycle后重挂            */
+/*  本文件只负责: 控制器初始化、设备/配置/MSOS描述符(复合布局是设备级配置)、  */
+/*  按描述符顺序注册接口与端点、把总线事件分发给各功能注册的钩子。            */
+/*  CDC/CAN/DAP的数据面在各自App模块, 经INIT_COMPONENT填充句柄完成注册。      */
 /***************************************************************************/
 
 bsp_usb_cdc_buffer_t cdc_handle;
-
-static struct usbd_interface cdc_intf0;
-static struct usbd_interface cdc_intf1;
-
-/* out池: 块首恒4字节对齐, 直接作为UEP4_RX_DMA落点 */
-static __attribute__((aligned(4))) uint8_t cdc_out_pool_storage[USB_CDC_OUT_BLOCK_SIZE * USB_CDC_OUT_BLOCK_COUNT];
-static volatile uint8_t *cdc_out_landing = RT_NULL;    // 当前OUT落块
-static volatile uint8_t cdc_out_paused = 0;            // 池耗尽, OUT端点未挂(NAK)
-
-/* 挂OUT端点读一块 (关中断内或USB ISR上下文调用) */
-static void bsp_usb_cdc_arm_out(uint8_t *block)
-{
-    cdc_out_landing = block;
-    usbd_ep_start_read(0, CDC_OUT_EP, block, USB_CDC_OUT_BLOCK_SIZE);
-}
-
-/* USB OUT完成(块满或短包): 提交旧块, 换新块续收; 池耗尽则挂起 */
-static void bsp_usb_cdc_out_done(uint16_t nbytes)
-{
-    g_dbg.out_done++;
-    g_dbg.out_bytes += nbytes;
-    if (nbytes == 0) {
-        /* 主机ZLP: 无数据, 原块重挂端点, 不提交不唤醒 */
-        g_dbg.out_zlp++;
-        bsp_usb_cdc_arm_out((uint8_t *)cdc_out_landing);
-        return;
-    }
-    bsp_pool_submit(&cdc_handle.rx_out_pool, (uint8_t *)cdc_out_landing, nbytes);
-    uint8_t *next = bsp_pool_acquire(&cdc_handle.rx_out_pool);
-    if (next != RT_NULL) {
-        bsp_usb_cdc_arm_out(next);
-    } else {
-        cdc_out_paused = 1;
-        g_dbg.out_pause++;
-    }
-    rt_sem_release(&cdc_handle.data_ready_sem);
-}
-
-/* bsp内部OUT完成处理, 再转发App事件 */
-static void bsp_usb_cdc_bulk_out(uint8_t busid, uint8_t ep, uint32_t nbytes)
-{
-    (void)ep;
-    bsp_usb_cdc_out_done((uint16_t)nbytes);
-}
-
-uint8_t bsp_usb_cdc_rx_pop(uint8_t **block, uint16_t *len)
-{
-    return bsp_pool_pop(&cdc_handle.rx_out_pool, block, len);
-}
-
-void bsp_usb_cdc_rx_recycle(uint8_t *block)
-{
-    bsp_pool_recycle(&cdc_handle.rx_out_pool, block);
-}
-
-void bsp_usb_cdc_rx_try_resume(void)
-{
-    rt_base_t level = rt_hw_interrupt_disable();
-    if (cdc_out_paused) {
-        uint8_t *next = bsp_pool_acquire(&cdc_handle.rx_out_pool);
-        if (next != RT_NULL) {
-            bsp_usb_cdc_arm_out(next);
-            cdc_out_paused = 0;
-            g_dbg.out_resume_ok++;
-        } else {
-            g_dbg.out_resume_fail++;
-        }
-    }
-    rt_hw_interrupt_enable(level);
-}
-
-void bsp_usb_cdc_rx_reset(uint8_t *uart_inflight)
-{
-    rt_base_t level = rt_hw_interrupt_disable();
-    uint8_t *except[1];
-    uint8_t except_n = 0;
-    if (uart_inflight != RT_NULL) {
-        except[0] = uart_inflight;
-        except_n = 1;
-    }
-    bsp_pool_reset(&cdc_handle.rx_out_pool, except, except_n);
-    uint8_t *first = bsp_pool_acquire(&cdc_handle.rx_out_pool);
-    if (first != RT_NULL) {
-        bsp_usb_cdc_arm_out(first);
-        cdc_out_paused = 0;
-    } else {
-        cdc_out_paused = 1;
-    }
-    rt_hw_interrupt_enable(level);
-}
-
-/***************************************************************************/
-/*                                                                         */
-/*                     can-usb桥 out(usb->can)块缓冲池                     */
-/*         与CDC OUT同模式: USB落块, 桥接线程pop解析, 池尽NAK背压          */
-/***************************************************************************/
-
 bsp_usb_can_buffer_t canusb_handle;
-
-static __attribute__((aligned(4))) uint8_t canusb_out_pool_storage[CAN_USB_BLOCK_SIZE * CAN_USB_OUT_BLOCKS];
-static volatile uint8_t *canusb_out_landing = RT_NULL;
-static volatile uint8_t canusb_out_paused = 0;
-
-static void bsp_can_usb_arm_out(uint8_t *block)
-{
-    canusb_out_landing = block;
-    usbd_ep_start_read(0, CAN_IF_OUT_EP, block, CAN_USB_BLOCK_SIZE);
-}
-
-/* CAN端点开启(CONFIGURED事件, 总线复位重枚举后重开) */
-/* CAN桥端点描述符(供usbd_ep_open, 无类驱动须自备) */
-static struct usb_endpoint_descriptor can_ep_out_desc = {
-    .bLength = 0x07,
-    .bDescriptorType = USB_DESCRIPTOR_TYPE_ENDPOINT,
-    .bEndpointAddress = CAN_IF_OUT_EP,
-    .bmAttributes = USB_ENDPOINT_TYPE_BULK,
-    .wMaxPacketSize = CAN_USB_BLOCK_SIZE,
-    .bInterval = 0,
-};
-static struct usb_endpoint_descriptor can_ep_in_desc = {
-    .bLength = 0x07,
-    .bDescriptorType = USB_DESCRIPTOR_TYPE_ENDPOINT,
-    .bEndpointAddress = CAN_IF_IN_EP,
-    .bmAttributes = USB_ENDPOINT_TYPE_BULK,
-    .wMaxPacketSize = CAN_USB_BLOCK_SIZE,
-    .bInterval = 0,
-};
-
-void bsp_can_usb_ep_open(void)
-{
-    /* CONFIGURED时调用(总线复位重枚举后重开, 幂等) */
-    usbd_ep_open(0, &can_ep_out_desc);
-    usbd_ep_open(0, &can_ep_in_desc);
-}
-
-/* DAP端点描述符(厂商bulk接口无类驱动, 自备; wMaxPacketSize=DAP_PACKET_SIZE=512) */
-static struct usb_endpoint_descriptor dap_ep_out_desc = {
-    .bLength = 0x07,
-    .bDescriptorType = USB_DESCRIPTOR_TYPE_ENDPOINT,
-    .bEndpointAddress = DAP_OUT_EP,
-    .bmAttributes = USB_ENDPOINT_TYPE_BULK,
-    .wMaxPacketSize = DAP_USB_PACKET_SIZE,
-    .bInterval = 0,
-};
-static struct usb_endpoint_descriptor dap_ep_in_desc = {
-    .bLength = 0x07,
-    .bDescriptorType = USB_DESCRIPTOR_TYPE_ENDPOINT,
-    .bEndpointAddress = DAP_IN_EP,
-    .bmAttributes = USB_ENDPOINT_TYPE_BULK,
-    .wMaxPacketSize = DAP_USB_PACKET_SIZE,
-    .bInterval = 0,
-};
-
-static void bsp_can_usb_out_done(uint16_t nbytes)
-{
-    if (nbytes == 0) {
-        /* 主机ZLP: 原块重挂 */
-        bsp_can_usb_arm_out((uint8_t *)canusb_out_landing);
-        return;
-    }
-    bsp_pool_submit(&canusb_handle.out_pool, (uint8_t *)canusb_out_landing, nbytes);
-    uint8_t *next = bsp_pool_acquire(&canusb_handle.out_pool);
-    if (next != RT_NULL) {
-        bsp_can_usb_arm_out(next);
-    } else {
-        canusb_out_paused = 1;
-    }
-    /* 唤醒统一走can活动信号量(桥接线程唯一等待点) */
-    extern struct rt_semaphore *bsp_can_activity_sem(void);
-    rt_sem_release(bsp_can_activity_sem());
-}
-
-static void bsp_can_usb_bulk_out(uint8_t busid, uint8_t ep, uint32_t nbytes)
-{
-    (void)busid;
-    (void)ep;
-    bsp_can_usb_out_done((uint16_t)nbytes);
-}
-
-int bsp_can_usb_ep_start_write(uint8_t busid, const uint8_t *data, uint32_t data_len)
-{
-    return usbd_ep_start_write(busid, CAN_IF_IN_EP, data, data_len);
-}
-
-int bsp_can_usb_get_mps(void)
-{
-    return CAN_USB_BLOCK_SIZE;
-}
-
-uint8_t bsp_can_usb_rx_pop(uint8_t **block, uint16_t *len)
-{
-    return bsp_pool_pop(&canusb_handle.out_pool, block, len);
-}
-
-void bsp_can_usb_rx_recycle(uint8_t *block)
-{
-    bsp_pool_recycle(&canusb_handle.out_pool, block);
-}
-
-void bsp_can_usb_rx_try_resume(void)
-{
-    rt_base_t level = rt_hw_interrupt_disable();
-    if (canusb_out_paused) {
-        uint8_t *next = bsp_pool_acquire(&canusb_handle.out_pool);
-        if (next != RT_NULL) {
-            bsp_can_usb_arm_out(next);
-            canusb_out_paused = 0;
-        }
-    }
-    rt_hw_interrupt_enable(level);
-}
-
-void bsp_can_usb_rx_reset(void)
-{
-    rt_base_t level = rt_hw_interrupt_disable();
-    bsp_pool_reset(&canusb_handle.out_pool, RT_NULL, 0);
-    uint8_t *first = bsp_pool_acquire(&canusb_handle.out_pool);
-    if (first != RT_NULL) {
-        bsp_can_usb_arm_out(first);
-        canusb_out_paused = 0;
-    } else {
-        canusb_out_paused = 1;
-    }
-    rt_hw_interrupt_enable(level);
-}
-
-/***************************************************************************/
-/*                                                                         */
-/*                          cdc in(uart->usb)发送                          */
-/*                                                                         */
-/***************************************************************************/
-
-int bsp_usb_cdc_ep_start_write(uint8_t busid, const uint8_t *data, uint32_t data_len)
-{
-    return usbd_ep_start_write(busid, CDC_IN_EP, data, data_len);
-}
-
-int bsp_usb_cdc_get_mps(void)
-{
-    return USB_CDC_OUT_BLOCK_SIZE;
-}
-
-/***************************************************************************/
-/*                                                                         */
-/*                                   dap相关                               */
-/*                                                                         */
-/***************************************************************************/
 bsp_usb_dap_buffer_t dap_handle;
 
 /* MSOS2.0免驱开关: 1=启用(Windows 8.1+自动绑定WinUSB) 0=关闭(调试用, Zadig手动绑定) */
 #define USB_DEBUG_MSOS 1
-
-/***************************************************************************/
-/*                                                                         */
-/*                                   usb总线配置                           */
-/*                                                                         */
-/***************************************************************************/
 
 /*!< config descriptor size */
 #define VENDOR_CAN_IF_DESC_SIZE (9 + 7 + 7)
@@ -312,8 +57,8 @@ static const uint8_t config_descriptor[] = {
     0x07, 0x05, CAN_IF_IN_EP, 0x02, 0x00, 0x02, 0x00,
 };
 
-/* MS OS 2.0描述符集(170B=集合头10+功能子集8+兼容ID 20+属性132)。类型值必须按
- * MS规范表9: 集合头0x00/功能子集头0x02/兼容ID 0x03/注册表属性0x04(0x06=ModelID,
+/* MS OS 2.0描述符集(330B=集合头10 + [功能子集CAN 160] + [功能子集DAP 160], 每子集=头8+兼容ID 20+属性132)。
+ * 类型值必须按MS规范表9: 集合头0x00/功能子集头0x02/兼容ID 0x03/注册表属性0x04(0x06=ModelID,
  * 0x08=厂商版本)。曾误用0x06/0x08: Windows按ModelID解析10B头但该类型固定22B,
  * 长度不符整集判废, 枚举在BOS后中止(usbccgp报STATUS_NO_SUCH_DEVICE)。 */
 static const uint8_t msosv2_descriptor_set[] = {
@@ -361,7 +106,7 @@ static const uint8_t bos_descriptor[] = {
 
 static struct usb_msosv2_descriptor msosv2_desc = {
     .compat_id = msosv2_descriptor_set,
-    .compat_id_len = sizeof(msosv2_descriptor_set),   /* 完整描述符集(内部wLength=0xAC一致) */
+    .compat_id_len = sizeof(msosv2_descriptor_set),   /* 完整描述符集(内部wLength一致) */
     .vendor_code = 0x20,
 };
 
@@ -425,38 +170,24 @@ const struct usb_descriptor usb_descriptor = {
 static void usbd_event_handler (uint8_t busid, uint8_t event) {
     if (event == USBD_EVENT_CONFIGURED) {
         updateSystemStatus(SYS_STA_USB_CONNECTED);
-        /* 重枚举: 重建OUT池并挂首块(池状态机的守卫会拒绝陈旧回收) */
-#if !CANUSB_SOLO_TEST
-        bsp_usb_cdc_rx_reset(RT_NULL);
-#endif
-        bsp_can_usb_ep_open();
-        bsp_can_usb_rx_reset();
-        /* DAP: 开端点后交App挂首包(命令泵 USB_Request[0]) */
-        usbd_ep_open(0, &dap_ep_out_desc);
-        usbd_ep_open(0, &dap_ep_in_desc);
-        extern void dap_event_handler(uint8_t busid, uint8_t event);
-        dap_event_handler(0, USBD_EVENT_CONFIGURED);
     }
-    /* cdc callback */
+    /* 事件分发给各功能注册的钩子(数据面在App模块内自愈:
+     * CONFIGURED时重建端点/OUT池重挂/挂首包, 总线复位后数据通路不关死) */
     if (cdc_handle.cdc_event_hander_callback) {
         cdc_handle.cdc_event_hander_callback(busid, event);
     }
+    if (canusb_handle.cfg_cb) {
+        canusb_handle.cfg_cb(busid, event);
+    }
+    if (dap_handle.cfg_cb) {
+        dap_handle.cfg_cb(busid, event);
+    }
 }
 
-static int bsp_usb_env_init(void)
-{
-    rt_sem_init(&cdc_handle.data_ready_sem, "cdc_rx", 0, RT_IPC_FLAG_FIFO);
-    rt_sem_init(&cdc_handle.lincoding_sem, "cdc_ctl", 0, RT_IPC_FLAG_FIFO);
-    bsp_pool_init(&cdc_handle.rx_out_pool, cdc_out_pool_storage, USB_CDC_OUT_BLOCK_SIZE, USB_CDC_OUT_BLOCK_COUNT);
-    rt_sem_init(&canusb_handle.data_ready_sem, "can_rx", 0, RT_IPC_FLAG_FIFO);
-    bsp_pool_init(&canusb_handle.out_pool, canusb_out_pool_storage, CAN_USB_BLOCK_SIZE, CAN_USB_OUT_BLOCKS);
-    rt_sem_init(&dap_handle.request_sem, "dap_rx", 0, RT_IPC_FLAG_FIFO);
-    return 0;
-}
-INIT_COMPONENT_EXPORT(bsp_usb_env_init);
-
-static struct usbd_interface can_vendor_intf;
+static struct usbd_interface cdc_intf0;
+static struct usbd_interface cdc_intf1;
 static struct usbd_interface dap_vendor_intf;
+static struct usbd_interface can_vendor_intf;
 
 static int bsp_usb_init(void)
 {
@@ -470,35 +201,19 @@ static int bsp_usb_init(void)
      * DAP再注册拿2(必须先于CAN: OpenOCD取第一个厂商bulk接口, CAN在前会
      * 抢走导致DAP_Info发给CAN桥), CAN最后拿3(SOLO实验时CAN曾前置抢0号,
      * Windows给CDC接口0的类请求被路由到无处理器的CAN接口→STALL→usbser
-     * 打开报错31的根因) */
-    cdc_handle.in_ep.ep_addr = CDC_IN_EP;
-    cdc_handle.out_ep.ep_addr = CDC_OUT_EP;
-    cdc_handle.out_ep.ep_cb = bsp_usb_cdc_bulk_out;
+     * 打开报错31的根因)。端点的addr/回调由各功能在INIT_COMPONENT阶段
+     * 填入各自句柄, 此处只做有序挂接 */
     usbd_add_interface (0, usbd_cdc_acm_init_intf (0, &cdc_intf0));
     usbd_add_interface (0, usbd_cdc_acm_init_intf (0, &cdc_intf1));
     usbd_add_endpoint (0, &cdc_handle.out_ep);
     usbd_add_endpoint (0, &cdc_handle.in_ep);
     memset(&dap_vendor_intf, 0, sizeof(dap_vendor_intf));
     usbd_add_interface (0, &dap_vendor_intf);
+    usbd_add_endpoint (0, &dap_handle.out_ep);
+    usbd_add_endpoint (0, &dap_handle.in_ep);
 #endif
     memset(&can_vendor_intf, 0, sizeof(can_vendor_intf));
     usbd_add_interface (0, &can_vendor_intf);
-    /* DAP端点注册(命令泵回调直连App) */
-    {
-        extern void dap_acm_bulk_out(uint8_t busid, uint8_t ep, uint32_t nbytes);
-        extern void dap_acm_bulk_in(uint8_t busid, uint8_t ep, uint32_t nbytes);
-        dap_handle.out_ep.ep_addr = DAP_OUT_EP;
-        dap_handle.out_ep.ep_cb = dap_acm_bulk_out;
-        dap_handle.in_ep.ep_addr = DAP_IN_EP;
-        dap_handle.in_ep.ep_cb = dap_acm_bulk_in;
-        usbd_add_endpoint (0, &dap_handle.out_ep);
-        usbd_add_endpoint (0, &dap_handle.in_ep);
-    }
-    canusb_handle.in_ep.ep_addr = CAN_IF_IN_EP;
-    canusb_handle.out_ep.ep_addr = CAN_IF_OUT_EP;
-    canusb_handle.out_ep.ep_cb = bsp_can_usb_bulk_out;
-    extern void can_bridge_bulk_in(uint8_t busid, uint8_t ep, uint32_t nbytes);
-    canusb_handle.in_ep.ep_cb = can_bridge_bulk_in;   /* App层链式续发 */
     usbd_add_endpoint (0, &canusb_handle.out_ep);
     usbd_add_endpoint (0, &canusb_handle.in_ep);
 

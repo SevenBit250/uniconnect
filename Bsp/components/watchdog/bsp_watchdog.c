@@ -4,18 +4,17 @@
  *
  * 背景: 存在未根除的RAM野写(对象: 线程TCB/黑匣子区/全局数据), RX已循环化、
  * TX为只读, 剩余可写内存的硬件只有USBHS OUT DMA(地址源: 驱动状态机).
- * 本看门狗在被保护地址布金丝雀, 并周期校验UEP4_RX_DMA指向; 命中立即把
- * 现场写入崩溃盒并死循环, 由OpenOCD读取定位.
+ * 本看门狗在被保护地址布金丝雀, 并周期校验登记OUT端点的RX_DMA指向; 命中
+ * 立即把现场写入崩溃盒并死循环, 由OpenOCD读取定位.
  */
 #include "ch32v30x.h"
 #include <rtthread.h>
 #include "bsp_watchdog.h"
-#include "bsp_usb.h"
 
-/* USBHS真实基址0x40023400(非0x40022000!), UEP4_RX_DMA偏移0x2C
- * (USBHSD_TypeDef: RX_DMA组从+0x20起, UEP4=+0x2C) -- 错误基址读到无关AHB外设
- * 垃圾值, 复合模式CDC武装后watchdog必误杀(0217全灭根因, 曾污染复合模式测试) */
-#define USBHS_UEP4_RX_DMA (*(volatile uint32_t *)(0x40023400u + 0x2Cu))
+/* USBHS真实基址0x40023400(非0x40022000!), RX_DMA组从+0x20起, UEPn=+0x20+4*(n-1)
+ * (错误基址读到无关AHB外设垃圾值, 复合模式CDC武装后watchdog必误杀(0217全灭根因,
+ * 曾污染复合模式测试)) */
+#define USBHS_UEPN_RX_DMA(n) (*(volatile uint32_t *)(0x40023400u + 0x20u + 4u * ((n) - 1)))
 
 /* 崩溃盒(与ch32v30x_it.c共用), [12..15]为看门狗槽 */
 #define CRASH_BOX ((volatile uint32_t *)0x2000F000)
@@ -25,7 +24,17 @@
 #define CANARY_COUNT 4u
 #define CANARY_MAGIC 0xA5C39E7Bu
 
-extern bsp_usb_cdc_buffer_t cdc_handle;   /* bsp_usb.c, 校验OUT DMA指向 */
+/* 受监护OUT端点(注册制, 0=未登记) */
+static volatile uint8_t guard_ep = 0;
+static volatile uint32_t guard_base = 0;
+static volatile uint32_t guard_size = 0;
+
+void bsp_watchdog_guard_out_ep(uint8_t ep_num, uint32_t pool_base, uint32_t pool_size)
+{
+    guard_ep = ep_num;
+    guard_base = pool_base & 0x1FFFFFFFu;
+    guard_size = pool_size;
+}
 
 static volatile uint32_t canary_addr[CANARY_COUNT];
 
@@ -65,14 +74,15 @@ void bsp_watchdog_check(void)
             }
         }
     }
-    /* 2. USBHS OUT DMA指向校验: 必须落在CDC OUT池内(或0)。
+    /* 2. USBHS OUT DMA指向校验(注册制, 数据面init时登记): 必须落在池内(或0)。
      * 实测该寄存器回读丢bit29(RAM基址0x20000000不存储, 硬件隐含),
      * 两侧都掩掉bit29再比较 -- 曾用截断值比完整指针, CDC一武装必误杀
      * (黑匣子kind=2实锤: dma=0x00007b20在池内却判越界, monitor线程陪葬) */
-    uint32_t dma = USBHS_UEP4_RX_DMA & 0x1FFFFFFFu;
-    uint32_t base = (uint32_t)cdc_handle.rx_out_pool.storage & 0x1FFFFFFFu;
-    if (dma != 0 && (dma < base || dma >= base + 4096)) {
-        watchdog_hit(2, dma, base);
+    if (guard_ep != 0) {
+        uint32_t dma = USBHS_UEPN_RX_DMA(guard_ep) & 0x1FFFFFFFu;
+        if (dma != 0 && (dma < guard_base || dma >= guard_base + guard_size)) {
+            watchdog_hit(2, dma, guard_base);
+        }
     }
     /* 3. 黑匣子看门狗槽被涂改检测(init时清零, 只有野写会改它) */
     if (CRASH_BOX[12] != 0 && CRASH_BOX[12] != 0x7A0DC0DEu) {

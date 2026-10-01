@@ -1,4 +1,5 @@
 #include <rtthread.h>
+#include <rthw.h>
 #include <string.h>
 #include "config.h"
 #include "bsp_config.h"
@@ -18,6 +19,121 @@
 
 static struct rt_thread can_bridge_thread;
 ALIGN(RT_ALIGN_SIZE) static char can_bridge_stack[CAN_BRIDGE_THREAD_STACK_SIZE];
+
+/***************************************************************************/
+/*                                                                         */
+/*              can-usb桥 out(usb->can)块缓冲池数据面 (2026-10-01          */
+/*              由bsp_usb.c移入: USB落块, 桥接线程pop解析, 池尽NAK背压)     */
+/*                                                                         */
+/***************************************************************************/
+
+/* out池: 块首恒4字节对齐, 直接作为OUT端点DMA落点 */
+static __attribute__((aligned(4))) uint8_t canusb_out_pool_storage[CAN_USB_BLOCK_SIZE * CAN_USB_OUT_BLOCKS];
+static volatile uint8_t *canusb_out_landing = RT_NULL;
+static volatile uint8_t canusb_out_paused = 0;
+
+static void can_out_arm(uint8_t *block)
+{
+    canusb_out_landing = block;
+    usbd_ep_start_read(0, CAN_IF_OUT_EP, block, CAN_USB_BLOCK_SIZE);
+}
+
+/* CAN桥端点描述符(厂商bulk接口无类驱动, 自备; wMaxPacketSize=CAN_USB_BLOCK_SIZE=512) */
+static struct usb_endpoint_descriptor can_ep_out_desc = {
+    .bLength = 0x07,
+    .bDescriptorType = USB_DESCRIPTOR_TYPE_ENDPOINT,
+    .bEndpointAddress = CAN_IF_OUT_EP,
+    .bmAttributes = USB_ENDPOINT_TYPE_BULK,
+    .wMaxPacketSize = CAN_USB_BLOCK_SIZE,
+    .bInterval = 0,
+};
+static struct usb_endpoint_descriptor can_ep_in_desc = {
+    .bLength = 0x07,
+    .bDescriptorType = USB_DESCRIPTOR_TYPE_ENDPOINT,
+    .bEndpointAddress = CAN_IF_IN_EP,
+    .bmAttributes = USB_ENDPOINT_TYPE_BULK,
+    .wMaxPacketSize = CAN_USB_BLOCK_SIZE,
+    .bInterval = 0,
+};
+
+static void can_out_done(uint16_t nbytes)
+{
+    if (nbytes == 0) {
+        /* 主机ZLP: 原块重挂 */
+        can_out_arm((uint8_t *)canusb_out_landing);
+        return;
+    }
+    bsp_pool_submit(&canusb_handle.out_pool, (uint8_t *)canusb_out_landing, nbytes);
+    uint8_t *next = bsp_pool_acquire(&canusb_handle.out_pool);
+    if (next != RT_NULL) {
+        can_out_arm(next);
+    } else {
+        canusb_out_paused = 1;
+    }
+    /* 唤醒统一走can活动信号量(桥接线程唯一等待点) */
+    rt_sem_release(bsp_can_activity_sem());
+}
+
+static void can_out_bulk_out(uint8_t busid, uint8_t ep, uint32_t nbytes)
+{
+    (void)busid;
+    (void)ep;
+    can_out_done((uint16_t)nbytes);
+}
+
+static int can_in_start_write(uint8_t busid, const uint8_t *data, uint32_t data_len)
+{
+    return usbd_ep_start_write(busid, CAN_IF_IN_EP, data, data_len);
+}
+
+static uint8_t can_out_pop(uint8_t **block, uint16_t *len)
+{
+    return bsp_pool_pop(&canusb_handle.out_pool, block, len);
+}
+
+static void can_out_recycle(uint8_t *block)
+{
+    bsp_pool_recycle(&canusb_handle.out_pool, block);
+}
+
+static void can_out_try_resume(void)
+{
+    rt_base_t level = rt_hw_interrupt_disable();
+    if (canusb_out_paused) {
+        uint8_t *next = bsp_pool_acquire(&canusb_handle.out_pool);
+        if (next != RT_NULL) {
+            can_out_arm(next);
+            canusb_out_paused = 0;
+        }
+    }
+    rt_hw_interrupt_enable(level);
+}
+
+/* 重建OUT池并重挂端点(CONFIGURED/总线复位时调用) */
+static void can_out_reset(void)
+{
+    rt_base_t level = rt_hw_interrupt_disable();
+    bsp_pool_reset(&canusb_handle.out_pool, RT_NULL, 0);
+    uint8_t *first = bsp_pool_acquire(&canusb_handle.out_pool);
+    if (first != RT_NULL) {
+        can_out_arm(first);
+        canusb_out_paused = 0;
+    } else {
+        canusb_out_paused = 1;
+    }
+    rt_hw_interrupt_enable(level);
+}
+
+/* 事件钩子(CONFIGURED时重开端点+重挂, 幂等) */
+static void can_usb_cfg_cb(uint8_t busid, uint8_t event)
+{
+    (void)busid;
+    if (event == USBD_EVENT_CONFIGURED) {
+        usbd_ep_open(0, &can_ep_out_desc);
+        usbd_ep_open(0, &can_ep_in_desc);
+        can_out_reset();
+    }
+}
 
 /* IN拼装块池: 轮转, 在途<=1块 */
 static __attribute__((aligned(4))) uint8_t in_blocks[CAN_USB_IN_BLOCKS][CAN_USB_BLOCK_SIZE];
@@ -61,7 +177,7 @@ static void in_try_flush(void)
     if (zlp_pending) {
         zlp_pending = 0;
         in_flight = 1;
-        if (bsp_can_usb_ep_start_write(0, RT_NULL, 0) != 0) {
+        if (can_in_start_write(0, RT_NULL, 0) != 0) {
             in_flight = 0;
         }
         return;
@@ -74,7 +190,7 @@ static void in_try_flush(void)
     in_cur = (in_cur + 1) % CAN_USB_IN_BLOCKS;
     in_len = 0;
     in_flight = 1;
-    if (bsp_can_usb_ep_start_write(0, blk, send_len) != 0) {
+    if (can_in_start_write(0, blk, send_len) != 0) {
         in_flight = 0;
     } else if (send_len == CAN_USB_BLOCK_SIZE) {
         zlp_pending = 1;   /* 512整块: 完成后先补ZLP */
@@ -319,10 +435,10 @@ static void can_bridge_thread_entry(void *param)
     rt_thread_mdelay(100);
     while (1) {
         /* 1. OUT块解析(usb->can) */
-        while (bsp_can_usb_rx_pop(&blk, &blen)) {
+        while (can_out_pop(&blk, &blen)) {
             handle_out_block(blk, blen);
-            bsp_can_usb_rx_recycle(blk);
-            bsp_can_usb_rx_try_resume();
+            can_out_recycle(blk);
+            can_out_try_resume();
         }
 
         /* 2. IN拼装: 回执 -> RX帧 -> 事件 */
@@ -343,6 +459,19 @@ static void can_bridge_thread_entry(void *param)
         rt_sem_take(bsp_can_activity_sem(), 2);   /* 2ms兜底轮询(OUT块/rx/回执/IN完成均唤醒) */
     }
 }
+
+/* 向下注册(早于bsp_usb层INIT_ENV的usbd_initialize) + OUT池初始化 */
+int can_bridge_env_init(void)
+{
+    canusb_handle.in_ep.ep_addr = CAN_IF_IN_EP;
+    canusb_handle.out_ep.ep_addr = CAN_IF_OUT_EP;
+    canusb_handle.out_ep.ep_cb = can_out_bulk_out;
+    canusb_handle.in_ep.ep_cb = can_bridge_bulk_in;   /* IN链式续发 */
+    canusb_handle.cfg_cb = can_usb_cfg_cb;
+    bsp_pool_init(&canusb_handle.out_pool, canusb_out_pool_storage, CAN_USB_BLOCK_SIZE, CAN_USB_OUT_BLOCKS);
+    return 0;
+}
+INIT_COMPONENT_EXPORT(can_bridge_env_init);
 
 int can_bridge_thread_init(void)
 {

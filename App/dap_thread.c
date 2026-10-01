@@ -47,16 +47,39 @@ ALIGN(RT_ALIGN_SIZE) static char dap_thread_stack[DAP_THREAD_STACK_SIZE];
 
 /***************************************************************************/
 /*                                                                         */
-/*                           CherryUSB 回调和端点                           */
+/*                    DAP bulk v2端点与事件(2026-10-01由bsp_usb.c移入)      */
 /*                                                                         */
 /***************************************************************************/
+
+/* DAP端点描述符(厂商bulk接口无类驱动, 自备; wMaxPacketSize=DAP_USB_PACKET_SIZE) */
+static struct usb_endpoint_descriptor dap_ep_out_desc = {
+    .bLength = 0x07,
+    .bDescriptorType = USB_DESCRIPTOR_TYPE_ENDPOINT,
+    .bEndpointAddress = DAP_OUT_EP,
+    .bmAttributes = USB_ENDPOINT_TYPE_BULK,
+    .wMaxPacketSize = DAP_USB_PACKET_SIZE,
+    .bInterval = 0,
+};
+static struct usb_endpoint_descriptor dap_ep_in_desc = {
+    .bLength = 0x07,
+    .bDescriptorType = USB_DESCRIPTOR_TYPE_ENDPOINT,
+    .bEndpointAddress = DAP_IN_EP,
+    .bmAttributes = USB_ENDPOINT_TYPE_BULK,
+    .wMaxPacketSize = DAP_USB_PACKET_SIZE,
+    .bInterval = 0,
+};
+
 void dap_event_handler(uint8_t busid, uint8_t event)
 {
+    (void)busid;
     switch (event) {
         case USBD_EVENT_RESET:
 
             break;
         case USBD_EVENT_CONFIGURED:
+            /* 自开端点后挂首包(幂等, 总线复位重枚举后自愈) */
+            usbd_ep_open(0, &dap_ep_out_desc);
+            usbd_ep_open(0, &dap_ep_in_desc);
             USB_RequestIdle = 0;
             g_dap_dbg[0]++;
             g_dap_dbg[2] = (uint32_t)usbd_ep_start_read(0, DAP_OUT_EP, USB_Request[0], DAP_PACKET_SIZE);
@@ -180,6 +203,13 @@ void dap_thread_entry(void *param)
 
 int dap_env_init(void)
 {
+    /* 向下注册(早于bsp_usb层INIT_ENV的usbd_initialize) + 数据面资源 */
+    dap_handle.out_ep.ep_addr = DAP_OUT_EP;
+    dap_handle.out_ep.ep_cb = dap_acm_bulk_out;
+    dap_handle.in_ep.ep_addr = DAP_IN_EP;
+    dap_handle.in_ep.ep_cb = dap_acm_bulk_in;
+    dap_handle.cfg_cb = dap_event_handler;
+    rt_sem_init(&dap_handle.request_sem, "dap_rx", 0, RT_IPC_FLAG_FIFO);
     return 0;
 }
 INIT_COMPONENT_EXPORT(dap_env_init);
