@@ -44,7 +44,12 @@ This information includes:
  - Optional information about a connected Target Device (for Evaluation Boards).
 */
 
-#include "stdint.h"                             
+#include "stdint.h"
+
+/* 板级引脚引擎与LED: 本文件是CMSIS-DAP到Bsp的移植缝, 引脚定义在
+ * Bsp/bsp_config.h (SWCLK=PB3, SWDIO=PB5, BSP_DAP_USE_SPI引擎切换) */
+#include "bsp_dap.h"
+#include "bsp_led.h"
 
 #ifndef __STATIC_INLINE
 #define __STATIC_INLINE                        static inline
@@ -314,7 +319,7 @@ Configures the DAP Hardware I/O pins for JTAG mode:
  - TDO to input mode.
 */
 __STATIC_INLINE void PORT_JTAG_SETUP (void) {
-  ;
+  ;   /* JTAG未支持(DAP_JTAG=0), 不会被调用 */
 }
 
 /** Setup SWD I/O pins: SWCLK, SWDIO, and nRESET.
@@ -323,7 +328,7 @@ Configures the DAP Hardware I/O pins for Serial Wire Debug (SWD) mode:
  - TDI, nTRST to HighZ mode (pins are unused in SWD mode).
 */
 __STATIC_INLINE void PORT_SWD_SETUP (void) {
-  ;
+  bsp_dap_swd_setup();
 }
 
 /** Disable JTAG/SWD I/O Pins.
@@ -331,7 +336,7 @@ Disables the DAP Hardware I/O pins which configures:
  - TCK/SWCLK, TMS/SWDIO, TDI, TDO, nTRST, nRESET to High-Z mode.
 */
 __STATIC_INLINE void PORT_OFF (void) {
-  ;
+  bsp_dap_off();
 }
 
 
@@ -348,14 +353,14 @@ __STATIC_FORCEINLINE uint32_t PIN_SWCLK_TCK_IN  (void) {
 Set the SWCLK/TCK DAP hardware I/O pin to high level.
 */
 __STATIC_FORCEINLINE void     PIN_SWCLK_TCK_SET (void) {
-  ;
+  bsp_dap_clk_set();
 }
 
 /** SWCLK/TCK I/O pin: Set Output to Low.
 Set the SWCLK/TCK DAP hardware I/O pin to low level.
 */
 __STATIC_FORCEINLINE void     PIN_SWCLK_TCK_CLR (void) {
-  ;
+  bsp_dap_clk_clr();
 }
 
 
@@ -365,51 +370,51 @@ __STATIC_FORCEINLINE void     PIN_SWCLK_TCK_CLR (void) {
 \return Current status of the SWDIO/TMS DAP hardware I/O pin.
 */
 __STATIC_FORCEINLINE uint32_t PIN_SWDIO_TMS_IN  (void) {
-  return (0U);
+  return (bsp_dap_dio_in());
 }
 
 /** SWDIO/TMS I/O pin: Set Output to High.
 Set the SWDIO/TMS DAP hardware I/O pin to high level.
 */
 __STATIC_FORCEINLINE void     PIN_SWDIO_TMS_SET (void) {
-  ;
+  bsp_dap_dio_set();
 }
 
 /** SWDIO/TMS I/O pin: Set Output to Low.
 Set the SWDIO/TMS DAP hardware I/O pin to low level.
 */
 __STATIC_FORCEINLINE void     PIN_SWDIO_TMS_CLR (void) {
-  ;
+  bsp_dap_dio_clr();
 }
 
 /** SWDIO I/O pin: Get Input (used in SWD mode only).
 \return Current status of the SWDIO DAP hardware I/O pin.
 */
 __STATIC_FORCEINLINE uint32_t PIN_SWDIO_IN      (void) {
-  return (0U);
+  return (bsp_dap_dio_in());
 }
 
 /** SWDIO I/O pin: Set Output (used in SWD mode only).
 \param bit Output value for the SWDIO DAP hardware I/O pin.
 */
 __STATIC_FORCEINLINE void     PIN_SWDIO_OUT     (uint32_t bit) {
-  ;
+  bsp_dap_dio_out(bit);
 }
 
 /** SWDIO I/O pin: Switch to Output mode (used in SWD mode only).
-Configure the SWDIO DAP hardware I/O pin to output mode. This function is
+Configure the SWDIO I/O pin to output mode. This function is
 called prior \ref PIN_SWDIO_OUT function calls.
 */
 __STATIC_FORCEINLINE void     PIN_SWDIO_OUT_ENABLE  (void) {
-  ;
+  bsp_dap_dio_out_enable();
 }
 
 /** SWDIO I/O pin: Switch to Input mode (used in SWD mode only).
-Configure the SWDIO DAP hardware I/O pin to input mode. This function is
+Configure the SWDIO I/O pin to input mode. This function is
 called prior \ref PIN_SWDIO_IN function calls.
 */
 __STATIC_FORCEINLINE void     PIN_SWDIO_OUT_DISABLE (void) {
-  ;
+  bsp_dap_dio_out_disable();
 }
 
 
@@ -497,14 +502,18 @@ It is recommended to provide the following LEDs for status indication:
            - 1: Connect LED ON: debugger is connected to CMSIS-DAP Debug Unit.
            - 0: Connect LED OFF: debugger is not connected to CMSIS-DAP Debug Unit.
 */
-__STATIC_INLINE void LED_CONNECTED_OUT (uint32_t bit) {}
+__STATIC_INLINE void LED_CONNECTED_OUT (uint32_t bit) {
+  bsp_led_ctrl(BSP_LED_ID_SWD_STA, (uint8_t)(bit & 1u));
+}
 
 /** Debug Unit: Set status Target Running LED.
-\param bit status of the Target Running LED.
-           - 1: Target Running LED ON: program execution in target started.
-           - 0: Target Running LED OFF: program execution in target stopped.
+\param bit status of the Running LED.
+           - 1: Running LED ON: program execution in target started.
+           - 0: Running LED OFF: program execution in target stopped.
 */
-__STATIC_INLINE void LED_RUNNING_OUT (uint32_t bit) {}
+__STATIC_INLINE void LED_RUNNING_OUT (uint32_t bit) {
+  bsp_led_ctrl(BSP_LED_ID_SWD_STA, (uint8_t)(bit & 1u));   /* 与Connected共用SWD灯 */
+}
 
 ///@}
 
@@ -549,7 +558,7 @@ Status LEDs. In detail the operation of Hardware I/O and LED pins are enabled an
  - LED output pins are enabled and LEDs are turned off.
 */
 __STATIC_INLINE void DAP_SETUP (void) {
-  ;
+  bsp_dap_init();   /* 时钟+JTAG释放(SWJ_Disable)+引脚初值, 幂等 */
 }
 
 /** Reset Target Device with custom specific I/O pin or command sequence.

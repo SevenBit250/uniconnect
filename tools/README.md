@@ -20,7 +20,17 @@
 | `can_usb_test.py` | CAN-USB 桥双路回归：静默回环模式双路各 1000 帧 + 状态计数对账 | `python tools/can_usb_test.py` |
 | `can_loopback_read.py` | CAN 双路静默回环自测读数：两次快照取增量验证 tx==rx 且 err/drop==0 | `python tools/can_loopback_read.py [PORT] [间隔秒]` |
 
-DAP 通路无独立脚本：直接 `openocd -c "adapter driver cmsis-dap" -c "transport select swd" -c init -c "cmsis-dap info" -c shutdown`，能读全 link 信息即 PASS。
+DAP 通路：`openocd -c "adapter driver cmsis-dap" -c "transport select swd" -c "init" -c "cmsis-dap info" -c shutdown` 能读全 link 信息即 PASS。**SWD 目标调试**（勿用 `-f target/*.cfg`——WCH 版 openocd 脚本搜索前缀损坏，用手工 DAP 声明）：
+
+```bash
+openocd -c "adapter driver cmsis-dap" -c "transport select swd" -c "adapter speed 1000" \
+  -c "swd newdap stm32 dp -expected-id 0x1ba01477" \
+  -c "dap create stm32.dap -chain-position stm32.dp" \
+  -c "target create stm32.cpu cortex_m -dap stm32.dap" \
+  -c init -c targets -c shutdown
+```
+
+（STM32F103 实测：DPIDR 0x1BA01477，Cortex-M3 r1p1，完整 DP/AP 枚举通过。接线：探针 PB3→SWCLK/PA14、PB5→SWDIO/PA13、共地。）
 
 ## 诊断工具（出问题再用）
 

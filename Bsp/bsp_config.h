@@ -18,6 +18,18 @@
  * (dap_thread按该值收发, 端点描述符按本值武装) */
 #define DAP_USB_PACKET_SIZE 512u
 
+/* ---- DAP/SWD 引擎 ----
+ * SWD引脚: SWCLK=PB3, SWDIO=PB5。PB3/PB4复用为JTDO/NJTRST, bsp_dap_init
+ * 里先SWJ_Disable释放(EVT PWR例程参考); PB3/PB5同时是SPI1 Remap后的
+ * SCK/MOSI -- SPI兼容引擎用单线半双工(SPI_Direction_1Line, EVT参考
+ * EXAM/SPI/1Lines_half-duplex)在PB5上双向收发。
+ * 引擎选择: 0=GPIO位拍(默认, 官方SW_DP.c逐位协议引擎直接驱动);
+ *           1=SPI兼容(字节级移位原语bsp_dap_spi_*, 供将来加速SWD引擎;
+ *              注意SPI硬件MSB先移而SWD线序LSB先, 软件需位反转) */
+#define DAP_SWCLK_PIN      GPIO_Pin_3
+#define DAP_SWDIO_PIN      GPIO_Pin_5
+#define BSP_DAP_USE_SPI    0
+
 /*!< mps usbfs: 64 */
 #define CDC_MAX_MPS 512u
 
