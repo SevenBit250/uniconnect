@@ -59,6 +59,9 @@ UniConnect：基于 CH32V305CCT6（RISC-V，主频 144MHz）的 CMSIS-DAP 调试
 - **WCH-Link DAP模式(WinUSB)在本机正常的真相: 不走MS OS, 走WCH签名INF驱动包**。WCH-LinkUtility/MRS安装时装入 WCHLinkWDM.INF(oem54.inf, WCH的EV证书签名), 按硬件ID `USB\VID_1A86&PID_8012&MI_00` 精确匹配后绑WinUSB。**WCH自家产品都不依赖MS OS 2.0免驱**。UniConnect量产路线决策: CAN接口改第二CDC(usbser全平台inbox零驱动, 二进制协议不变), DAP走HID v1+bulk v2双接口; MS OS描述符保留但非依赖项。
 - **MS OS 2.0 免驱失败的根因（2026-10-01 已修）**：描述符集两个类型字段违反 MS 规范表 9——集合头 `wDescriptorType` 误为 0x0006（=Model ID，规范固定 22B，我们 10B，长度校验失败）、功能子集头误为 0x0008（=Vendor Revision，未定义用途）。正确值：**集合头 0x0000 / 配置子集 0x01 / 功能子集 0x02 / 兼容ID 0x03 / 注册表属性 0x04**（见 CherryUSB `common/usb_def.h` 288-295 行与微软规范 Table 9）。Windows 按 Model ID 解析失败后整集判废 → 枚举在 BOS 后中止（SET_CONFIG 不发、字符串不读、usbccgp 1ms 内 STATUS_NO_SUCH_DEVICE）——与 ETW 观测完全吻合。此前"描述符内容已排除"结论错误（当时只核对了长度/UUID/GUID，漏了类型值）；KB5124008 补丁时间线是巧合。历史排查中 EP0 多包 bug、ISR 竞态、watchdog 基址、注册顺序、stale object 等修复均为真实缺陷，保留。**真机验证 PASS（2026-10-01）**：接口 2 `Service=WINUSB`、兼容 ID `USB\MS_COMP_WINUSB`，双路 CAN 1000 帧回环全 PASS（`tools/can_usb_test.py`，PID 0x0218）。调试期曾用 PID 0x0220 隔离 Windows 设备缓存，验证后已恢复生产 PID。
 - CAN（2026-10-01 真实总线打通）：**引脚：CAN1=PA12(TX)/PA11(RX)（默认映射，v1 板布线实锚；曾误用 Remap1=PB8/9，静默回环不驱动总线故从未暴露）、CAN2=PB13(TX)/PB12(RX)（固定）**。bxCAN 无 DMA 请求线——FMP 中断收帧 + TX 空中断续装。APB1=72MHz，1M 波特率 = P4 × 18tq。**BTIMR 位段按厂商库：BRP[9:0] SJW[25:24] TS2[22:20] TS1[19:16]**（曾把 TS2 写在 [15:12] 无效位）。**WCH bxCAN 真总线帧实测进 FIFO1 而非 FIFO0**（FAFIFOR 与 STM32 语义不符且高位只读）——固件双 FIFO 收割 + FMP0/FMP1 双中断。`CAN_FilterInit` 只收一个参数（bank 序号决定归属，`CAN_SlaveStartBank` 切分 28 组 bank）。WCH 库 `CAN_Init` 成功返回 1。**静默回环自测覆盖不了引脚映射与 FIFO 路由——真总线测试 `tools/can_bus_test.py`（正常模式双通道对接）是 CAN 回归必跑项**。收发器 SN65HVD251，总线 60Ω 终端。
+- **[致命] CAN 换模式禁止裸写 BTIMR，必须整跑库 `CAN_Init`（2026-10-02 真机实锤）**：本封装（chippackid 4-7）的 `CAN_Init` 内嵌出厂自检序列（RCC 复位脉冲 → 4Mbps 静默回环自测帧 → 再复位脉冲），每次调用洗净全部影子状态；官方 EVT TestMode 例程换模式也从不裸写 BTIMR、每次重跑 `CAN_Init`。自研"INRQ→写 BTIMR→退 init"轻量路径在控制器**有过睡眠史后**不可靠：退 init 时测试模式采样出错，NORMAL 带**隐藏回环**（可发送/收自己/拒收总线，与 RM 24.3.2 回环定义逐字吻合），而 BTIMR 读数完全正常（寄存器面干净、核心行为错位）——表现为真总线双通道交叉 reception 全灭、`can_bus_test.py` 收 0，且回环自测仍 PASS（掩盖故障）。修复：`can_hw_reconfig` 全程走 `CAN_Init` + `CAN_Sleep`（RM Fig24-1 唯一合法睡眠边 Normal→Sleep）+ **每次 CAN_Init 后必须重挂过滤器**（自检段会重写 bank0/1 并 `CAN_SlaveStartBank(1)`）。RM 精读要点：CTLR bit16=DBF 复位值 1（正常态非隐藏位）；bit15=控制器内置软复位；睡眠态仅邮箱寄存器可访问。上电默认真 close（控制器睡眠，SET_MODE 显式打开）已落地，RM 24.2.1 亦记载复位后默认睡眠。
+- **[致命] `bsp_uart_write` 的 TC 轮询在 USART 未使能时死锁**：CH32V30x 上 TE 从未使能则 STATR.TC 恒 0（与 STM32 复位值 1 的经验相反），`rt_hw_console_output`→`bsp_uart_write` 的 INIT 阶段打印会把整个启动链卡死（现象：全灯灭+USB 不枚举+所有线程 TCB 全零，openocd 读 PC 停在 TC 轮询）。UART 上电默认 close 后，`bsp_uart_write` 必须 `!uart_started` 直接丢弃返回。
+- **openocd halt 会打断 Windows 枚举窗口且软件侧无法恢复**：flash 后枚举进行时 halt（或 halt/resume 循环）→ Windows 枚举失败后不再重试，`reset run`/`pnputil /scan-devices` 均救不回，只能物理重插。观测 RAM 用 `init/halt/mdw/resume/shutdown` 一次性完成，别在 flash 后立刻 halt。
 
 ## 开发铁律
 
@@ -70,13 +73,14 @@ UniConnect：基于 CH32V305CCT6（RISC-V，主频 144MHz）的 CMSIS-DAP 调试
 - 注释、commit message、文档用中文；commit 风格见 `git log`（短中文描述）。
 - 命名：厂商库 `ch32v30x_` 前缀，BSP 层 `bsp_` 前缀（`Bsp/inc` + `Bsp/src`），RT-Thread 用 `rt_` 前缀，应用层小写下划线。
 - 调试输出用 `rt_kprintf()`；USB 协议栈日志走 `CONFIG_USB_PRINTF()` 宏。
-- 状态 LED 共 5 个（SYS/SWD/COM/CAN1/CAN2），统一通过 `bsp_led_ctrl/toggle` 操作，高电平为灭。
+- 状态 LED 共 5 个（STA/SWD(DAP)/COM/CAN1/CAN2），统一通过 `bsp_led_ctrl/toggle` 操作，高电平为灭。**灯语（2026-10-02 定稿，monitor 线程唯一渲染，数据路径零 LED 代码）**：STA=USB 未连接 1s 周期闪烁/连接后常亮；四个功能灯=未 open 灭、open 无数据常亮、有数据 200ms 固定间隔闪烁（活动窗口增量优先于 open 标志）。**open 信号源**：COM=主机 DTR（强符号覆盖 CherryUSB `__WEAK usbd_cdc_acm_set_dtr` 写 `g_led_open.com`，USB RESET 清零）；DAP=官方 `DAP_HostStatus` 命令（DAP.c→`LED_CONNECTED_OUT` 宏改写 `g_led_open.dap_conn`，OpenOCD 会话进出发 connected=1/0，CONFIGURED 清零兜底）；CAN1/2=硬件通道模式（`bsp_can_get_mode != SLEEP`，SET_MODE 驱动）。活动计数源：g_dbg（COM=uart_submits+tx_dma，CAN=canN_tx+rx）、`g_dap_dbg[1]`（DAP OUT 回调）。
 - 新线程的优先级/栈大小必须加到 `User/config.h`，不要在源文件里写魔数。
 
 ## 当前进度（2026-10）
 
-- CDC↔UART 双向块缓冲零拷贝：已落地，921600–9M 全档位零丢失（回归 11/11 PASS）。
-- CAN 双路驱动 + CAN-USB 桥（WinUSB 复用双路）：已落地，**真实总线双向千帧零丢失（can_bus_test.py）+ 静默自测双 PASS**。
+- CDC↔UART 双向块缓冲零拷贝：已落地，921600–9M 全档位零丢失（回归 11/11 PASS）。**UART/USART 上电默认 close（延迟启动）**：首次线控配置才启动 USART+RX DMA，COM 灯 open=DTR；DTR=0 只灭灯不 deinit（SET_LINE_CODING 有 memcmp 去重，deinit 后重开口不重发线控会断数据路径）。
+- CAN 双路驱动 + CAN-USB 桥（WinUSB 复用双路）：已落地，**真实总线双向千帧零丢失（can_bus_test.py）+ 静默自测双 PASS**。**上电默认真 close（控制器睡眠）+ SET_MODE 显式 open**（2026-10-02 落地，换模式硅级坑见上）。
+- **LED 灯语系统（2026-10-02 落地）**：monitor 线程统一渲染 5 灯（STA 1s 闪/常亮；COM/DAP/CAN1/2 灭/常亮/200ms 闪），open 信号锚定硬件/协议语义（DTR/HostStatus/CAN 模式），历经回环+真总线+混压回归全绿。
 - MS OS 2.0 免驱：根因（描述符类型字段违反规范表 9）已修，真机免驱绑定 WinUSB 验证 PASS。
 - **DAP bulk v2 通路已打通（2026-10-01）**：接口 2（"CMSIS-DAP"），OpenOCD 不接目标板可读完整 link 信息（v2/SWD/Atomic/FW 2.1.1/引脚状态），与 CAN 回归双绿。
 - DAP/SWD：**全链路已打通（2026-10-01 真机验证）**：SWD 引脚引擎 `Bsp/device/dap/bsp_dap.{c,h}`（SWCLK=PB3/SWDIO=PB5，GPIO 位拍为**现役引擎**，有效 SWCLK ~5.3MHz）；对 STM32F103C8T6 真机完成 DP/AP 全枚举（DPIDR=0x1BA01477，Cortex-M3 r1p1，6 断点 4 观察点）。**全功能测试 PASS（同日）**：halt/resume/step、内核寄存器、RAM 读写回环、硬件断点（FPB 精确命中 Reset_Handler）、数据观察点（DWT 捕获 .data 写）、flash 读/全擦/编程/128KB 逐字节校验全循环、SWD 时钟 2/4/8MHz 全稳定（实测验证吞吐 59KiB/s@4MHz；DAP_THREAD_STACK 因此 1024→1536，压测水位 672B）。**SPI 加速暂存**：v1 板缺 MISO 桥接（全双工+串联电阻路线需 PB4 直连 SWDIO、PB5 经 ~1K 电阻），完整调查与 v2 恢复步骤见 `docs/spi-accel-swd-worklog.md`；引擎骨架与 `BSP_DAP_USE_SPI` 宏已在库。WCH 版 openocd 的 target/*.cfg 有损坏的脚本搜索前缀，勿用 `-f target/stm32f1x.cfg`，用手工 DAP 声明（命令已固化 tools/README.md）。

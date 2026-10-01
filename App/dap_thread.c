@@ -15,6 +15,7 @@
 #include "DAP.h"
 #include "bsp.h"
 #include "bsp_config.h"
+#include "main.h"
 
 extern bsp_usb_dap_buffer_t dap_handle;
 
@@ -82,6 +83,9 @@ void dap_event_handler(uint8_t busid, uint8_t event)
             usbd_ep_open(0, &dap_ep_in_desc);
             USB_RequestIdle = 0;
             g_dap_dbg[0]++;
+            /* 新USB会话清DAP功能灯open标志(主机崩溃退出发不了connected=0的兜底) */
+            g_led_open.dap_conn = 0;
+            g_led_open.dap_run = 0;
             g_dap_dbg[2] = (uint32_t)usbd_ep_start_read(0, DAP_OUT_EP, USB_Request[0], DAP_PACKET_SIZE);
             break;
         default:

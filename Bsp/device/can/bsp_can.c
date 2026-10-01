@@ -385,7 +385,35 @@ static void can_abort_pending(uint8_t ch)
     }
 }
 
-/* 进入初始化模式重写BTIMR(模式+波特率)后退出; SLEEP模式则停在睡眠 */
+/* 过滤器重挂: 库CAN_Init的自检段会重写过滤器(激活bank0/1+SlaveStartBank(1)),
+ * 每次CAN_Init后必须重挂本设计的双通道布局(bank0-13归CAN1, bank14-27归CAN2) */
+static void can_filters_apply(void)
+{
+    CAN_FilterInitTypeDef f = {0};
+
+    CAN_SlaveStartBank(14);
+    f.CAN_FilterMode = CAN_FilterMode_IdMask;
+    f.CAN_FilterScale = CAN_FilterScale_32bit;
+    f.CAN_FilterIdHigh = 0;
+    f.CAN_FilterIdLow = 0;
+    f.CAN_FilterMaskIdHigh = 0;    /* 掩码0 = 全收 */
+    f.CAN_FilterMaskIdLow = 0;
+    f.CAN_FilterFIFOAssignment = CAN_Filter_FIFO0;
+    f.CAN_FilterActivation = ENABLE;
+
+    f.CAN_FilterNumber = 0;
+    CAN_FilterInit(&f);            /* bank0-13归CAN1 */
+    f.CAN_FilterNumber = 14;
+    CAN_FilterInit(&f);            /* bank14-27归CAN2 */
+}
+
+/* 模式/波特率重配 -- 控制器操作全程走库CAN_Init(EVT TestMode例程同款做法:
+ * 本封装的CAN_Init内含复位脉冲+4Mbps静默自检, 每次调用洗净全部影子状态)。
+ * 曾自研"INRQ→BTIMR→退init"轻量换模路径: 控制器一旦有过睡眠史, 退init时
+ * 测试模式采样出错 -- NORMAL带隐藏回环(可发/收自己/拒收总线, 同RM24.3.2
+ * 回环定义), 而BTIMR读数完全正常; 无睡眠史时同一路径又工作。真机多轮二分
+ * +RM/EVT例程对照定性(2026-10-02)。SLEEP用库CAN_Sleep(RM Fig24-1唯一合法
+ * 边Normal→Sleep), 上电默认真close亦走此路径 */
 static int can_hw_reconfig(uint8_t ch, uint32_t kbps, uint8_t mode)
 {
     CAN_TypeDef *CANx = can_chan[ch].reg;
@@ -399,36 +427,45 @@ static int can_hw_reconfig(uint8_t ch, uint32_t kbps, uint8_t mode)
 
     can_abort_pending(ch);
 
-    uint32_t level = rt_hw_interrupt_disable();   // 关CAN中断防重入
+    uint32_t level = rt_hw_interrupt_disable();   // 关CAN中断防重入(自检含忙等, 亚毫秒级)
     CANx->INTENR = 0;
 
-    CANx->CTLR &= ~CAN_CTLR_SLEEP;
-    CANx->CTLR |= CAN_CTLR_INRQ;
-    tout = 0;
-    while (!(CANx->STATR & CAN_STATR_INAK) && ++tout < 1000000);
-    if (!(CANx->STATR & CAN_STATR_INAK)) {
+    CAN_InitTypeDef s = {0};
+    s.CAN_TTCM = DISABLE;
+    s.CAN_ABOM = ENABLE;    /* 总线脱离自动恢复 */
+    s.CAN_AWUM = DISABLE;
+    s.CAN_NART = DISABLE;   /* 仲裁失败/出错自动重发(CAN标准行为) */
+    s.CAN_RFLM = DISABLE;   /* FIFO满新帧覆盖旧帧 */
+    s.CAN_TXFP = ENABLE;    /* 按请求顺序发送 */
+    s.CAN_Mode = (mode == CAN_MODE_LOOPBACK_TEST) ? CAN_Mode_Silent_LoopBack
+                                                  : CAN_Mode_Normal;
+    s.CAN_SJW = CAN_SJW_1tq;
+    s.CAN_BS1 = CAN_BS1_13tq;
+    s.CAN_BS2 = CAN_BS2_4tq;
+    s.CAN_Prescaler = brp;
+    /* 注意: WCH库CAN_Init成功返回1失败返回0(STM32风格), 不能按真值判断 */
+    if (CAN_Init(CANx, &s) != CAN_InitStatus_Success) {
         rt_hw_interrupt_enable(level);
         return -2;
     }
 
-    /* BTIMR位段(厂商库CAN_Init同源): BRP[9:0] SJW[25:24] TS2[22:20] TS1[19:16] LBKM[30] SILM[31]
-     * 曾把TS2写在[15:12](无效保留位) → 硬件TS2实际=1tq, 时序劣化且与库初始化路径不一致 */
-    uint32_t bt = (brp - 1) | (0u << 24) | (3u << 20) | (12u << 16);
-    if (mode == CAN_MODE_LOOPBACK_TEST) {
-        bt |= (3u << 30);   /* SILM+LBKM */
-    }
-    CANx->BTIMR = bt;
-
-    if (mode == CAN_MODE_SLEEP) {
-        CANx->CTLR |= CAN_CTLR_SLEEP;
-    }
-    CANx->CTLR &= ~CAN_CTLR_INRQ;
-    tout = 0;
-    while ((CANx->STATR & CAN_STATR_INAK) && ++tout < 1000000);
+    /* CAN_Init自检段重写了过滤器, 须醒着重挂(睡眠态仅邮箱寄存器可访问) */
+    can_filters_apply();
 
     CAN_ClearITPendingBit(CANx, CAN_IT_TME);
-    CANx->RFIFO0 = CAN_RFIFO0_RFOM0;   /* 丢弃模式切换期间的陈旧接收 */
+    CANx->RFIFO0 = CAN_RFIFO0_RFOM0;   /* 丢弃模式切换期间的陈旧接收(双FIFO都放) */
+    CANx->RFIFO1 = CAN_RFIFO1_RFOM1;
     CANx->INTENR = CAN_IT_FMP0 | CAN_IT_FMP1 | CAN_IT_TME;
+
+    if (mode == CAN_MODE_SLEEP) {
+        CAN_Sleep(CANx);
+        tout = 0;
+        while (!(CANx->STATR & CAN_STATR_SLAK) && ++tout < 1000000);
+        if (!(CANx->STATR & CAN_STATR_SLAK)) {
+            rt_hw_interrupt_enable(level);
+            return -3;
+        }
+    }
     rt_hw_interrupt_enable(level);
 
     can_cur_mode[ch] = mode;
@@ -466,9 +503,8 @@ uint8_t bsp_can_get_mode(uint8_t ch)
 int bsp_can_init(uint8_t mode)
 {
     GPIO_InitTypeDef GPIO_InitStructure = {0};
-    CAN_InitTypeDef CAN_InitStructure = {0};
-    CAN_FilterInitTypeDef CAN_FilterInitStructure = {0};
     NVIC_InitTypeDef NVIC_InitStructure = {0};
+    (void)mode;   /* 上电恒为SLEEP真close, 模式由主机SET_MODE显式打开 */
 
     uint32_t bitrate = CAN_BITRATE_KBPS * 1000u;
     uint32_t brp = CAN_PCLK1_HZ / (bitrate * CAN_TQ_PER_BIT);
@@ -510,47 +546,9 @@ int bsp_can_init(uint8_t mode)
         for (uint8_t m = 0; m < 3; m++) {
             can_chan[ch].mbox_handle[m] = MBOX_HANDLE_NONE;
         }
-        can_cur_mode[ch] = mode;
+        can_cur_mode[ch] = CAN_MODE_SLEEP;
         can_cur_kbps[ch] = CAN_BITRATE_KBPS;
     }
-
-    CAN_InitStructure.CAN_TTCM = DISABLE;
-    CAN_InitStructure.CAN_ABOM = ENABLE;    /* 总线脱离自动恢复 */
-    CAN_InitStructure.CAN_AWUM = DISABLE;
-    CAN_InitStructure.CAN_NART = DISABLE;   /* 仲裁失败/出错自动重发(CAN标准行为) */
-    CAN_InitStructure.CAN_RFLM = DISABLE;   /* FIFO满新帧覆盖旧帧 */
-    CAN_InitStructure.CAN_TXFP = ENABLE;    /* 按请求顺序发送 */
-    CAN_InitStructure.CAN_Mode = (mode == CAN_MODE_LOOPBACK_TEST)
-                                     ? CAN_Mode_Silent_LoopBack
-                                     : CAN_Mode_Normal;
-    CAN_InitStructure.CAN_SJW = CAN_SJW_1tq;
-    CAN_InitStructure.CAN_BS1 = CAN_BS1_13tq;
-    CAN_InitStructure.CAN_BS2 = CAN_BS2_4tq;
-    CAN_InitStructure.CAN_Prescaler = brp;
-
-    /* 注意: WCH库CAN_Init成功返回1失败返回0(STM32风格), 不能按真值判断
-     * (曾因if(ret)把成功当失败, CAN1后早退: CAN2未初始化+中断未使能) */
-    uint8_t ret = CAN_Init(CAN1, &CAN_InitStructure);
-    if (ret != CAN_InitStatus_Success) return -2;
-    ret = CAN_Init(CAN2, &CAN_InitStructure);
-    if (ret != CAN_InitStatus_Success) return -3;
-
-    /* 过滤器: 28组bank, 前14归CAN1后14归CAN2, 各用1组32位掩码全收 → FIFO0 */
-    CAN_SlaveStartBank(14);
-
-    CAN_FilterInitStructure.CAN_FilterNumber = 0;
-    CAN_FilterInitStructure.CAN_FilterMode = CAN_FilterMode_IdMask;
-    CAN_FilterInitStructure.CAN_FilterScale = CAN_FilterScale_32bit;
-    CAN_FilterInitStructure.CAN_FilterIdHigh = 0;
-    CAN_FilterInitStructure.CAN_FilterIdLow = 0;
-    CAN_FilterInitStructure.CAN_FilterMaskIdHigh = 0;
-    CAN_FilterInitStructure.CAN_FilterMaskIdLow = 0;
-    CAN_FilterInitStructure.CAN_FilterFIFOAssignment = CAN_Filter_FIFO0;
-    CAN_FilterInitStructure.CAN_FilterActivation = ENABLE;
-    CAN_FilterInit(&CAN_FilterInitStructure);   /* bank0-13归CAN1 */
-
-    CAN_FilterInitStructure.CAN_FilterNumber = 14;
-    CAN_FilterInit(&CAN_FilterInitStructure);   /* bank14-27归CAN2 */
 
     /* 中断: RX0/TX, 抢占优先级2(低于USBHS=1/TC4=0) */
     NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 2;
@@ -569,8 +567,13 @@ int bsp_can_init(uint8_t mode)
     NVIC_InitStructure.NVIC_IRQChannel = TIM3_IRQn;
     NVIC_Init(&NVIC_InitStructure);
 
-    CAN_ITConfig(CAN1, CAN_IT_FMP0 | CAN_IT_FMP1 | CAN_IT_TME, ENABLE);
-    CAN_ITConfig(CAN2, CAN_IT_FMP0 | CAN_IT_FMP1 | CAN_IT_TME, ENABLE);
+    /* 上电默认真close: 控制器初始化+过滤器+进睡眠统一走can_hw_reconfig
+     * (内含库CAN_Init完整序列, 见其注释) */
+    for (uint8_t ch = 0; ch < CAN_CH_NUM; ch++) {
+        if (can_hw_reconfig(ch, CAN_BITRATE_KBPS, CAN_MODE_SLEEP) != 0) {
+            return -4;
+        }
+    }
     return 0;
 }
 

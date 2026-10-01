@@ -46,10 +46,10 @@ This information includes:
 
 #include "stdint.h"
 
-/* 板级引脚引擎与LED: 本文件是CMSIS-DAP到Bsp的移植缝, 引脚定义在
+/* 板级引脚引擎与LED标志: 本文件是CMSIS-DAP到Bsp的移植缝, 引脚定义在
  * Bsp/bsp_config.h (SWCLK=PB3, SWDIO=PB5, BSP_DAP_USE_SPI引擎切换) */
 #include "bsp_dap.h"
-#include "bsp_led.h"
+#include "main.h"   /* g_led_open: DAP功能灯open标志(monitor线程渲染GPIO) */
 
 #ifndef __STATIC_INLINE
 #define __STATIC_INLINE                        static inline
@@ -503,7 +503,9 @@ It is recommended to provide the following LEDs for status indication:
            - 0: Connect LED OFF: debugger is not connected to CMSIS-DAP Debug Unit.
 */
 __STATIC_INLINE void LED_CONNECTED_OUT (uint32_t bit) {
-  bsp_led_ctrl(BSP_LED_ID_SWD_STA, (uint8_t)(bit & 1u));
+  /* DAP.c的HostStatus命令驱动(OpenOCD会话建立/退出时发): 只写标志,
+   * GPIO渲染集中在monitor线程(数据路径零LED代码) */
+  g_led_open.dap_conn = (uint8_t)(bit & 1u);
 }
 
 /** Debug Unit: Set status Target Running LED.
@@ -512,7 +514,7 @@ __STATIC_INLINE void LED_CONNECTED_OUT (uint32_t bit) {
            - 0: Running LED OFF: program execution in target stopped.
 */
 __STATIC_INLINE void LED_RUNNING_OUT (uint32_t bit) {
-  bsp_led_ctrl(BSP_LED_ID_SWD_STA, (uint8_t)(bit & 1u));   /* 与Connected共用SWD灯 */
+  g_led_open.dap_run = (uint8_t)(bit & 1u);   /* 目标运行态, 暂不渲染 */
 }
 
 ///@}

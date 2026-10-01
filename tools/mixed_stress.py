@@ -6,6 +6,8 @@ USB复合设备open被拒(Access denied); 反序可共存。故CAN进程先启�
 claim接口3), 2秒后CDC进程启动(pyserial开COM10), 之后两进程全时长并发。
 
 CAN进程: 真实总线双通道对接, 双向持续轮转发帧+逐帧内容校验。
+  CH1延迟CH2_OPEN_DELAY_S打开(灯语观察: 单通道常亮期), 结束后SET_MODE(SLEEP)
+  关闭双通道(CAN灯灭, 硬件回close)。
 CDC进程: 满速写+并发读线程(物理回环), 累计字节数。
 
 用法: python tools/mixed_stress.py [分钟] [CAN波特率] [CDC波特率]
@@ -34,7 +36,8 @@ def can_proc(dur_s, kbps, q):
     CANP_TX, CANP_CTRL, CANP_RX, CANP_TXACK, CANP_EVENT, CANP_CTRL_RSP = \
         0x01, 0x02, 0x11, 0x13, 0x14, 0x15
     CANC_SET_BITRATE, CANC_SET_MODE = 0x02, 0x03
-    CAN_MODE_NORMAL = 1
+    CAN_MODE_NORMAL, CAN_MODE_SLEEP = 1, 2
+    CH2_OPEN_DELAY_S = 3.0   # CH1延迟打开: 制造两通道open错峰(灯语观察)
 
     import threading
 
@@ -106,9 +109,11 @@ def can_proc(dur_s, kbps, q):
                     d.last_ctrl_rsp = (ch, p[0], p[1], p[2:])
                 off += 8 + plen
 
-    for ch in (0, 1):
-        ctrl(ch, CANC_SET_BITRATE, struct.pack('<I', kbps))
-        ctrl(ch, CANC_SET_MODE, bytes([CAN_MODE_NORMAL]))
+    ctrl(0, CANC_SET_BITRATE, struct.pack('<I', kbps))
+    ctrl(0, CANC_SET_MODE, bytes([CAN_MODE_NORMAL]))
+    time.sleep(CH2_OPEN_DELAY_S)
+    ctrl(1, CANC_SET_BITRATE, struct.pack('<I', kbps))
+    ctrl(1, CANC_SET_MODE, bytes([CAN_MODE_NORMAL]))
 
     def one_dir(tx_ch, rx_ch, n, h0):
         d.rx_frames[tx_ch].clear()
@@ -145,6 +150,9 @@ def can_proc(dur_s, kbps, q):
         h = (h + 0x1000) & 0xFFFF
         if not ok:
             fails += 1
+
+    for ch in (0, 1):   # 结束关闭双通道(硬件回close, CAN灯灭)
+        ctrl(ch, CANC_SET_MODE, bytes([CAN_MODE_SLEEP]))
     q.put(('can', rounds, fails))
 
 

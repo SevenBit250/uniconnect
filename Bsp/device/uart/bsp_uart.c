@@ -195,13 +195,54 @@ static inline void bsp_uart_config_private (USART_TypeDef *uart, uint32_t baudra
     USART_Init (uart, &USART_InitStructure);
 }
 
+/* RX DMA循环模式启动: 上电延迟到首次线控配置(USART开转前无请求源) */
+static void uart_rx_dma_start(void)
+{
+    DMA_InitTypeDef DMA_InitStructure = {0};
+
+    DMA_DeInit (DMA1_Channel5);
+    while (DMA1_Channel5->CFGR & DMA_CFGR1_EN) {}
+    DMA_InitStructure.DMA_PeripheralInc                  = DMA_PeripheralInc_Disable;
+    DMA_InitStructure.DMA_MemoryInc                      = DMA_MemoryInc_Enable;
+    DMA_InitStructure.DMA_PeripheralDataSize             = DMA_PeripheralDataSize_Byte;
+    DMA_InitStructure.DMA_MemoryDataSize                 = DMA_MemoryDataSize_Byte;
+    DMA_InitStructure.DMA_Mode                           = DMA_Mode_Circular;
+    DMA_InitStructure.DMA_Priority                       = DMA_Priority_VeryHigh;
+    DMA_InitStructure.DMA_M2M                            = DMA_M2M_Disable;
+    DMA_InitStructure.DMA_PeripheralBaseAddr             = (uint32_t)(&USART1->DATAR);
+    DMA_InitStructure.DMA_MemoryBaseAddr                 = (uint32_t)uart_rx_ring;
+    DMA_InitStructure.DMA_DIR                            = DMA_DIR_PeripheralSRC;
+    DMA_InitStructure.DMA_BufferSize                     = UART_RX_RING_SIZE;
+    DMA_Init (DMA1_Channel5, &DMA_InitStructure);
+    /* HT/TC作圈中里程碑(收割兜底), 平时由消费端主动drain */
+    DMA_ITConfig (DMA1_Channel5, DMA_IT_TC | DMA_IT_HT, ENABLE);
+    DMA_Cmd (DMA1_Channel5, ENABLE);
+    /* TX的DMAT按传输门控(见write_by_dma/TC4), RX常开(循环模式安全) */
+    USART_DMACmd (USART1, USART_DMAReq_Rx, ENABLE);
+}
+
+static volatile uint8_t uart_started = 0;
+
 void bsp_uart_config(uint32_t baudrate, uint8_t stopbits, uint8_t parity)
 {
     bsp_uart_config_private (USART1, baudrate, stopbits, parity);
+    if (!uart_started) {
+        /* 上电默认close(USART/RX DMA均未启动), 首次线控配置才真正开转;
+         * USART_Init为读改写保留UE位, 此后换波特率路径行为不变 */
+        uart_started = 1;
+        USART_ITConfig (USART1, USART_IT_IDLE, ENABLE);
+        USART_Cmd (USART1, ENABLE);
+        uart_rx_dma_start();
+    }
 }
 
 void bsp_uart_write(const uint8_t *data, uint32_t size)
 {
+    if (!uart_started) {
+        /* 上电默认close: USART未启动时TC恒为0, 阻塞发送会死锁(曾把INIT阶段
+         * 的rt_kprintf控制台输出卡死在TC轮询, 整个启动链停摆); 此时丢弃输出 */
+        return;
+    }
     for (uint32_t i = 0; i < size; i++) {
         while(USART_GetFlagStatus(USART1, USART_FLAG_TC) == RESET);
         USART_SendData(USART1, *(data + i));
@@ -332,7 +373,6 @@ void bsp_uart_rx_reset(void)
 
 static int bsp_uart_init(void)
 {
-    DMA_InitTypeDef DMA_InitStructure = {0};
     GPIO_InitTypeDef GPIO_InitStructure = {0};
     NVIC_InitTypeDef NVIC_InitStructure = {0};
 
@@ -350,15 +390,12 @@ static int bsp_uart_init(void)
     GPIO_InitStructure.GPIO_Mode                         = GPIO_Mode_IPU;
     GPIO_Init (GPIOA, &GPIO_InitStructure);
 
-    // uart init
+    // uart nvic(中断源未开: USART延迟到首次线控配置才启动, 上电默认close)
     NVIC_InitStructure.NVIC_IRQChannel                   = USART1_IRQn;
     NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 1;
     NVIC_InitStructure.NVIC_IRQChannelSubPriority        = 1;
     NVIC_InitStructure.NVIC_IRQChannelCmd                = ENABLE;
-    bsp_uart_config_private (USART1, 115200, 0, 0);
-    USART_ITConfig (USART1, USART_IT_IDLE, ENABLE);
     NVIC_Init (&NVIC_InitStructure);
-    USART_Cmd (USART1, ENABLE);
 
     // rx dma nvic
     NVIC_InitStructure.NVIC_IRQChannel                   = DMA1_Channel5_IRQn;
@@ -373,27 +410,6 @@ static int bsp_uart_init(void)
     NVIC_InitStructure.NVIC_IRQChannelSubPriority        = 0;
     NVIC_InitStructure.NVIC_IRQChannelCmd                = ENABLE;
     NVIC_Init (&NVIC_InitStructure);
-
-    // rx dma: 循环模式落环, DMA永不停转
-    DMA_DeInit (DMA1_Channel5);
-    while (DMA1_Channel5->CFGR & DMA_CFGR1_EN) {}
-    DMA_InitStructure.DMA_PeripheralInc                  = DMA_PeripheralInc_Disable;
-    DMA_InitStructure.DMA_MemoryInc                      = DMA_MemoryInc_Enable;
-    DMA_InitStructure.DMA_PeripheralDataSize             = DMA_PeripheralDataSize_Byte;
-    DMA_InitStructure.DMA_MemoryDataSize                 = DMA_MemoryDataSize_Byte;
-    DMA_InitStructure.DMA_Mode                           = DMA_Mode_Circular;
-    DMA_InitStructure.DMA_Priority                       = DMA_Priority_VeryHigh;
-    DMA_InitStructure.DMA_M2M                            = DMA_M2M_Disable;
-    DMA_InitStructure.DMA_PeripheralBaseAddr             = (uint32_t)(&USART1->DATAR);
-    DMA_InitStructure.DMA_MemoryBaseAddr                 = (uint32_t)uart_rx_ring;
-    DMA_InitStructure.DMA_DIR                            = DMA_DIR_PeripheralSRC;
-    DMA_InitStructure.DMA_BufferSize                     = UART_RX_RING_SIZE;
-    DMA_Init (DMA1_Channel5, &DMA_InitStructure);
-    /* HT/TC作圈中里程碑(收割兜底), 平时由消费端主动drain */
-    DMA_ITConfig (DMA1_Channel5, DMA_IT_TC | DMA_IT_HT, ENABLE);
-    DMA_Cmd (DMA1_Channel5, ENABLE);
-    /* TX的DMAT按传输门控(见write_by_dma/TC4), RX常开(循环模式安全) */
-    USART_DMACmd (USART1, USART_DMAReq_Rx, ENABLE);
 
     return 0;
 }

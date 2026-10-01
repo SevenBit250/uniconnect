@@ -23,7 +23,6 @@ typedef struct {
     bsp_pool_t rx_out_pool;                          // CDC OUT块缓冲池
     rt_bool_t tx_buffer_empty;                       // USB IN方向无在途发送
     rt_bool_t allow_transfer;                        // 允许数据传输(线控已配置)
-    volatile uint8_t led_blink_req;                  // LED确认双闪请求(monitor线程消费)
     struct rt_semaphore data_ready_sem;              // CDC OUT数据就绪信号量(块已提交)
     struct rt_semaphore lincoding_sem;               // 设备配置信号量
     struct usbd_endpoint in_ep;

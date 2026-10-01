@@ -5,7 +5,6 @@
 #include "bsp_config.h"
 #include "bsp_can.h"
 #include "bsp_usb.h"
-#include "bsp_led.h"
 #include "bsp_pool.h"
 #include "usbd_core.h"
 
@@ -430,7 +429,6 @@ static void can_bridge_thread_entry(void *param)
     (void)param;
     uint8_t *blk;
     uint16_t blen;
-    uint32_t act = 0;
 
     rt_thread_mdelay(100);
     while (1) {
@@ -450,13 +448,8 @@ static void can_bridge_thread_entry(void *param)
         /* 3. 冲一块(有数据且无在途即发) */
         in_try_flush();
 
-        /* 4. LED示活 + 等活动(OUT块/rx帧/回执/IN完成都唤醒) */
-        act++;
-        if ((act & 0x3FF) == 0) {
-            bsp_led_toggle(BSP_LED_ID_CAN1_STA);
-            bsp_led_toggle(BSP_LED_ID_CAN2_STA);
-        }
-        rt_sem_take(bsp_can_activity_sem(), 2);   /* 2ms兜底轮询(OUT块/rx/回执/IN完成均唤醒) */
+        /* 4. 等活动(OUT块/rx帧/回执/IN完成都唤醒; LED归monitor统一渲染) */
+        rt_sem_take(bsp_can_activity_sem(), 2);   /* 2ms兜底轮询 */
     }
 }
 

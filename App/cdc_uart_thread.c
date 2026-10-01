@@ -19,6 +19,8 @@
 #include "rthw.h"
 #include "bsp.h"
 #include "bsp_watchdog.h"
+#include "main.h"
+#include <stdbool.h>
 
 // cdc和uart句柄
 extern bsp_uart_buffer_t uart_handle;
@@ -159,6 +161,7 @@ void cdc_uart_event_handler(uint8_t busid, uint8_t event)
     switch (event) {
         case USBD_EVENT_RESET:
             cdc_handle.allow_transfer = RT_FALSE;
+            g_led_open.com = 0;   /* 新USB会话: DTR重新置位前COM灯不亮 */
             break;
         case USBD_EVENT_CONFIGURED:
             /* 数据面自愈: 重建OUT池并重挂首块(总线复位重枚举后) */
@@ -224,6 +227,15 @@ void usbd_cdc_acm_set_line_coding (uint8_t busid, uint8_t intf, struct cdc_line_
         cdc_handle.allow_transfer = RT_FALSE;
         rt_sem_release(&cdc_handle.lincoding_sem);
     }
+}
+
+/* COM功能灯open源: 主机串口DTR(pyserial/Windows开口默认置1, 关口置0);
+ * 强符号覆盖CherryUSB的__WEAK钩子, 只写标志, GPIO渲染在monitor线程 */
+void usbd_cdc_acm_set_dtr (uint8_t busid, uint8_t intf, bool dtr)
+{
+    (void)busid;
+    (void)intf;
+    g_led_open.com = dtr ? 1 : 0;
 }
 
 void usbd_cdc_acm_get_line_coding (uint8_t busid, uint8_t intf, struct cdc_line_coding *line_coding)
@@ -330,8 +342,6 @@ void cdc_ctrl_thread_entry(void *param)
         // 重置发送状态
         cdc_handle.tx_buffer_empty = RT_TRUE;
         cdc_handle.allow_transfer = RT_TRUE;
-        // LED确认双闪请求(monitor线程执行, ctrl不再直接碰LED)
-        cdc_handle.led_blink_req = 2;
     }
 }
 

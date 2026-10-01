@@ -4,6 +4,7 @@
 #include "usbd_core.h"
 
 static system_status_t sysyem_status = SYS_STA_USB_NOT_CONNECTED;
+led_open_t g_led_open = {0};
 
 int main(void)
 {
