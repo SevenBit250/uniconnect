@@ -5,7 +5,7 @@
 #define __BOOT_H
 
 #include <stdint.h>
-#include "../User/boot_shared.h"   /* BOINIT共享区/flash旗标页布局(单一事实源) */
+#include "boot_shared.h"          /* BOINIT共享区/flash旗标页布局(单一事实源), common/经-I解析 */
 
 /* ---- flash 分区 (CODE 256KB) ---- */
 #define BOOT_FLASH_BASE      0x00000000u
