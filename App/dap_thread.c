@@ -16,6 +16,7 @@
 #include "bsp.h"
 #include "bsp_config.h"
 #include "main.h"
+#include "boot_shared.h"
 
 extern bsp_usb_dap_buffer_t dap_handle;
 
@@ -148,6 +149,7 @@ void dap_thread_entry(void *param)
 
         // Process pending requests
         while (USB_RequestCountI != USB_RequestCountO) {
+            uint8_t reboot_to_boot = 0;
             // Handle Queue Commands
             n = USB_RequestIndexO;
             while (USB_Request[n][0] == ID_DAP_QueueCommands) {
@@ -159,8 +161,20 @@ void dap_thread_entry(void *param)
             }
 
             // Execute DAP Command (process request and prepare response)
-            USB_RespSize[USB_ResponseIndexI] =
-                    (uint16_t) DAP_ExecuteCommand(USB_Request[USB_RequestIndexO], USB_Response[USB_ResponseIndexI]);
+            if (USB_Request[USB_RequestIndexO][0] == ID_DAP_Vendor0) {
+                /* 升级触发(fw_update.py阶段1): 写BOINIT旗标+回DAP_OK, 应答
+                 * 送出后软复位进boot。旗标走软复位存活的RAM共享区, APP侧
+                 * 零flash操作(boot_shared.h), 上电(POR)丢旗标=正常启动 */
+                volatile boinit_t *bi = (volatile boinit_t *)BOINIT_BASE;
+                bi->magic = BOINIT_MAGIC_REQ;
+                USB_Response[USB_ResponseIndexI][0] = ID_DAP_Vendor0;
+                USB_Response[USB_ResponseIndexI][1] = DAP_OK;
+                USB_RespSize[USB_ResponseIndexI] = 2;
+                reboot_to_boot = 1;
+            } else {
+                USB_RespSize[USB_ResponseIndexI] =
+                        (uint16_t) DAP_ExecuteCommand(USB_Request[USB_RequestIndexO], USB_Response[USB_ResponseIndexI]);
+            }
 
             // Update Request Index and Count
             USB_RequestIndexO++;
@@ -194,6 +208,13 @@ void dap_thread_entry(void *param)
                     USB_ResponseIdle = 0U;
                     usbd_ep_start_write(0, DAP_IN_EP, USB_Response[n], USB_RespSize[n]);
                 }
+            }
+
+            if (reboot_to_boot) {
+                /* 等 Vendor0 应答(IN DMA)完成并到达主机后再复位, 主机读到
+                 * DAP_OK才进入阶段2等boot(fw_update.py超时2000ms, 100ms足够) */
+                rt_thread_mdelay(100);
+                NVIC_SystemReset();
             }
         }
     }

@@ -132,7 +132,7 @@ static const char *string_descriptors[] = {
     (const char[]){0x09, 0x04}, /* Langid */
     "UniConnect", /* Manufacturer */
     "UniConnect CMSIS-DAP Bridge", /* Product */
-    "UNICONNECT-19", /* Serial Number: 变更可触发Windows全新安装(重跑MSOS2.0绑定) */
+    "UNICONNECT-34", /* Serial Number: 变更可触发Windows全新安装(重跑MSOS2.0绑定) */
     "CMSIS-DAP", /* 接口字符串: bulk v2识别标志(OpenOCD/pyOCD按此匹配, 规范2.1) */
     "UniConnect CAN Bridge", /* CAN桥接口字符串: 与DAP区分, 防止工具误认 */
 };

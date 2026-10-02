@@ -3,9 +3,13 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-#include "rtthread.h"
 #include "usbd_core.h"
 #include "usb_ch32_usbhs_reg.h"
+/* APP(RT-Thread)与boot(裸机)共用本驱动: 裸机编译定义CONFIG_USB_BAREMETAL
+ * 以剥离对rtthread.h与中断嵌套计数的依赖(2026-10-02 boot工程引入) */
+#ifndef CONFIG_USB_BAREMETAL
+#include "rtthread.h"
+#endif
 
 #ifndef USB_NUM_BIDIR_ENDPOINTS
 #define USB_NUM_BIDIR_ENDPOINTS 16
@@ -466,7 +470,11 @@ void USBHS_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 void USBHS_IRQHandler(void)
 {
     extern void USBD_IRQHandler(uint8_t busid);
+#ifndef CONFIG_USB_BAREMETAL
     rt_interrupt_enter();
+#endif
     USBD_IRQHandler(0);
+#ifndef CONFIG_USB_BAREMETAL
     rt_interrupt_leave();
+#endif
 }

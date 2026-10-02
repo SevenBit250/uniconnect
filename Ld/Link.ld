@@ -11,8 +11,13 @@ MEMORY
    CH32V30x_D8 - CH32V303CB-CH32V303RB
 */
 
-	FLASH (rx) : ORIGIN = 0x00000000, LENGTH = 256K
-	RAM (xrw) : ORIGIN = 0x20000000, LENGTH = 64K
+	FLASH (rx) : ORIGIN = 0x00005000, LENGTH = 232K
+	RAM (xrw) : ORIGIN = 0x20000000, LENGTH = 52K
+	/* 分区(docs/bootloader-design.md): 0x0-0x4FFF=bootloader(独立工程boot/)
+	 * 0x3F000起4KB=升级旗标页(仅boot写); APP平移至0x5000, .appsig魔法字
+	 * 占0x5000首4B, 启动入口_start落在0x5004(boot跳APP_BASE+4) */
+	/* BOINIT: 与boot同址的boot/APP同步noinit区(boot_shared.h) */
+	BOINIT (xrw) : ORIGIN = 0x2000D000, LENGTH = 4K
 
     
 /* CH32V30x_D8C - CH32V307VC-CH32V307WC-CH32V307RC-CH32V305CC
@@ -34,6 +39,14 @@ MEMORY
 
 SECTIONS
 {
+	/* APP镜像头魔法字(boot侧app_sig_ok校验, User/main.c放置); 必须先于
+	 * .init占据FLASH首4B, 使启动入口精确落在ORIGIN+4 */
+	.appsig :
+	{
+		. = ALIGN(4);
+		KEEP(*(.appsig))
+		. = ALIGN(4);
+	} >FLASH AT>FLASH
 
 	.init :
 	{
@@ -196,6 +209,13 @@ SECTIONS
 
 PROVIDE( _end = _ebss);
 PROVIDE( end = . );
+
+	/* boot/APP同步区: 绝对地址访问, NOLOAD(启动不清不拷) */
+	.boinit (NOLOAD) :
+	{
+		. = ALIGN(4);
+		KEEP(*(.boinit))
+	} >BOINIT
 
 /* 调试基建保留区机械防回退: 0xE000起为PMP诱饵区(2KB)/金丝雀(0xE800)/
  * 崩溃黑匣子(0xF000), 均为固定地址裸访问, .bss增长侵入=DAP/CAN运行时
