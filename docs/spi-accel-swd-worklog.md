@@ -10,7 +10,7 @@
 
 ## 已完成的工作（代码在库，`BSP_DAP_USE_SPI` 宏切换）
 
-1. **引擎架构**（`Bsp/device/dap/bsp_dap.c`）：
+1. **引擎架构**（`app/Bsp/device/dap/bsp_dap.c`）：
    - 强符号覆盖官方 `__WEAK` 的 `SWJ_Sequence` / `SWD_Sequence` / `SWD_Transfer`
      （官方 CMSIS-DAP v2.1 预留的板级加速钩子，vendored 零侵入）；
    - 字节级移位 + 相位位偏移切片：线上协议逐位不变，SPI 每 8 线位打包一字节，
@@ -52,7 +52,7 @@
 
 ## 恢复步骤
 
-1. `Bsp/bsp_config.h`：`BSP_DAP_USE_SPI` 置 1；
+1. `app/Bsp/bsp_config.h`：`BSP_DAP_USE_SPI` 置 1；
 2. 重写 `bsp_dap.c` SPI 后端为**全双工**（删掉 BIDIMODE/方向切换/SPE 门控）：
    统一 `spi_xfer(tx, rx, n)`，读事务 = xfer 6 字节（req + 5），MISO 流按位偏移
    切片（现有 getbits/REV 基建直接复用）；写事务 = xfer（req + dummy(电阻弱驱) +

@@ -83,7 +83,7 @@ boot/            ← 独立裸机固件工程(CMake 目标 boot.elf, boot/boot.l
   User/usb_glue.c  单HID描述符+裸机泵(CONFIG_USB_BAREMETAL 共用端口驱动)
   复用: CherryUSB(core+hid) + common/ 厂商库最小集(接口源集)
 app/             ← APP 固件工程(CMake 目标 uniconnect.elf, app/app.ld ORIGIN=0x5000)
-  Application/dap_thread.c Vendor0 拦截 + User/main.c .appsig + User/boot_shared.h 触发
+  Application/dap_thread.c Vendor0 拦截 + app/User/main.c .appsig + common/boot_shared.h 触发
 common/boot_shared.h  BOINIT/旗标页/APP_SIG_MAGIC 单一事实源(已收敛于此)
 tools/fw_update.py  两阶段升级工具
 ```

@@ -6,7 +6,7 @@
 
 | 工具 | 作用 | 用法 |
 |---|---|---|
-| `msos_validate.py` | MS OS 2.0 描述符集机械校验：结构平铺、子集长度、集合/BOS 双份总长同步、类型值（规范表 9）。改 `Bsp/device/usb/bsp_usb.c` 的 MSOS/BOS 必跑，勿肉眼对字节（曾两次拦下丢字节/漏同步） | `python tools/msos_validate.py` |
+| `msos_validate.py` | MS OS 2.0 描述符集机械校验：结构平铺、子集长度、集合/BOS 双份总长同步、类型值（规范表 9）。改 `app/Bsp/device/usb/bsp_usb.c` 的 MSOS/BOS 必跑，勿肉眼对字节（曾两次拦下丢字节/漏同步） | `python tools/msos_validate.py` |
 | `stack_watermark.py` | 线程栈高水位检测：openocd 读栈（RT-Thread '#' 预填单调保持，事后扫描等价实时），按 map 解析各栈实占与利用率，默认 60% 报警。改任何线程栈配置后必跑 | `python tools/stack_watermark.py --limit 60`（Release 固件加 `--map build-rel/uniconnect.map`） |
 
 ## 回归套件（固件改动后按此顺序跑）
@@ -54,4 +54,4 @@ openocd -c "adapter driver cmsis-dap" -c "transport select swd" -c "adapter spee
 
 - **魔法波特率 1234567**：CDC 打开后设为此波特率，固件经 CDC IN 返回 `g_dbg` 全链路计数器快照（84B，29 个 u32），各诊断脚本据此对账。
 - **崩溃黑匣子 0x2000F000**：HardFault 现场（mcause/mepc/mtval/ra/sp）+ 看门狗槽[12..15]，`openocd halt + mdw` 直读。
-- **openocd 观测**：`halt + mdw <map符号地址>` 可读运行固件任意 RAM/寄存器（配合 `riscv-none-embed-nm obj/uniconnect.elf` 查地址）。
+- **openocd 观测**：`halt + mdw <map符号地址>` 可读运行固件任意 RAM/寄存器（配合 `riscv-none-embed-nm build/uniconnect.elf` 查地址）。
