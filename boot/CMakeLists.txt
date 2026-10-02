@@ -7,6 +7,7 @@ set(CMAKE_C_FLAGS_DEBUG "-O1 -g")
 add_executable(boot.elf
     User/main.c
     User/boot_it.c
+    User/bsp_led.c
     User/bootproto.c
     User/flash_io.c
     User/usb_glue.c

@@ -47,7 +47,7 @@ This information includes:
 #include "stdint.h"
 
 /* 板级引脚引擎与LED标志: 本文件是CMSIS-DAP到Bsp的移植缝, 引脚定义在
- * Bsp/bsp_config.h (SWCLK=PB3, SWDIO=PB5, BSP_DAP_USE_SPI引擎切换) */
+ * common/pin.h (SWCLK=PB3, SWDIO=PB5, BSP_DAP_USE_SPI引擎切换; 位拍宏保持本文件直写实现) */
 #include "bsp_dap.h"
 #include "main.h"   /* g_led_open: DAP功能灯open标志(monitor线程渲染GPIO) */
 

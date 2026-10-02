@@ -1,4 +1,5 @@
 #include "bsp_uart.h"
+#include "pin.h"     /* 全板引脚单一事实源(common/) */
 #include "bsp_config.h"
 #include "ch32v30x.h"
 #include <rtthread.h>
@@ -381,14 +382,14 @@ static int bsp_uart_init(void)
     RCC_APB2PeriphClockCmd (RCC_APB2Periph_GPIOA, ENABLE);
     RCC_APB2PeriphClockCmd (RCC_APB2Periph_USART1, ENABLE);
 
-    // gpio init
-    GPIO_InitStructure.GPIO_Pin                          = GPIO_Pin_9;
+    // gpio init (引脚宏来自 common/pin.h)
+    GPIO_InitStructure.GPIO_Pin                          = PIN_USART1_TX_PIN;
     GPIO_InitStructure.GPIO_Speed                        = GPIO_Speed_50MHz;
     GPIO_InitStructure.GPIO_Mode                         = GPIO_Mode_AF_PP;
-    GPIO_Init (GPIOA, &GPIO_InitStructure);
-    GPIO_InitStructure.GPIO_Pin                          = GPIO_Pin_10;
+    GPIO_Init (PIN_USART1_TX_PORT, &GPIO_InitStructure);
+    GPIO_InitStructure.GPIO_Pin                          = PIN_USART1_RX_PIN;
     GPIO_InitStructure.GPIO_Mode                         = GPIO_Mode_IPU;
-    GPIO_Init (GPIOA, &GPIO_InitStructure);
+    GPIO_Init (PIN_USART1_RX_PORT, &GPIO_InitStructure);
 
     // uart nvic(中断源未开: USART延迟到首次线控配置才启动, 上电默认close)
     NVIC_InitStructure.NVIC_IRQChannel                   = USART1_IRQn;

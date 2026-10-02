@@ -1,17 +1,19 @@
 #include "bsp_led.h"
 #include "ch32v30x.h"
+#include "pin.h"     /* 全板引脚单一事实源(common/), 本文件不再私定义 */
 #include <rtthread.h>
 
-#define SWD_STA_Port GPIOB
-#define SWD_STA_Pin GPIO_Pin_10
-#define SYS_STA_Port GPIOB
-#define SYS_STA_Pin GPIO_Pin_11
-#define COM_STA_Port GPIOC
-#define COM_STA_Pin GPIO_Pin_4
-#define CAN1_STA_Port GPIOA
-#define CAN1_STA_Pin GPIO_Pin_4
-#define CAN2_STA_Port GPIOA
-#define CAN2_STA_Pin GPIO_Pin_3
+/* 引脚宏迁移: 原私有宏 -> pin.h 统一命名(值不变) */
+#define SWD_STA_Port  PIN_LED_DAP_PORT
+#define SWD_STA_Pin   PIN_LED_DAP_PIN
+#define SYS_STA_Port  PIN_LED_STA_PORT
+#define SYS_STA_Pin   PIN_LED_STA_PIN
+#define COM_STA_Port  PIN_LED_COM_PORT
+#define COM_STA_Pin   PIN_LED_COM_PIN
+#define CAN1_STA_Port PIN_LED_CAN1_PORT
+#define CAN1_STA_Pin  PIN_LED_CAN1_PIN
+#define CAN2_STA_Port PIN_LED_CAN2_PORT
+#define CAN2_STA_Pin  PIN_LED_CAN2_PIN
 
 struct led_group_typedef
 {

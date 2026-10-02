@@ -3,6 +3,7 @@
 #include <rthw.h>
 #include <string.h>
 #include "bsp_can.h"
+#include "pin.h"     /* 全板引脚单一事实源(common/) */
 #include "bsp_config.h"
 #include "bsp_pool.h"      /* g_dbg */
 
@@ -522,22 +523,22 @@ int bsp_can_init(uint8_t mode)
      * 真机核对); 曾误用Remap1(PB8/9), 静默回环不驱动总线故未暴露。USBHS在
      * PB6/7无冲突。PD0/PD1(全重映射)在48脚封装不存在。CAN_REMAP复位值0
      * 即默认映射, 勿写Remap(厂商库读改写会污染PCFR1其他位) */
-    GPIO_InitStructure.GPIO_Pin = GPIO_Pin_12;
+    GPIO_InitStructure.GPIO_Pin = PIN_CAN1_TX_PIN;
     GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF_PP;
     GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
-    GPIO_Init(GPIOA, &GPIO_InitStructure);
-    GPIO_InitStructure.GPIO_Pin = GPIO_Pin_11;
+    GPIO_Init(PIN_CAN1_TX_PORT, &GPIO_InitStructure);
+    GPIO_InitStructure.GPIO_Pin = PIN_CAN1_RX_PIN;
     GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IPU;
-    GPIO_Init(GPIOA, &GPIO_InitStructure);
+    GPIO_Init(PIN_CAN1_RX_PORT, &GPIO_InitStructure);
 
     /* CAN2: PB13=TX PB12=RX(固定映射) */
-    GPIO_InitStructure.GPIO_Pin = GPIO_Pin_13;
+    GPIO_InitStructure.GPIO_Pin = PIN_CAN2_TX_PIN;
     GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF_PP;
     GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
-    GPIO_Init(GPIOB, &GPIO_InitStructure);
-    GPIO_InitStructure.GPIO_Pin = GPIO_Pin_12;
+    GPIO_Init(PIN_CAN2_TX_PORT, &GPIO_InitStructure);
+    GPIO_InitStructure.GPIO_Pin = PIN_CAN2_RX_PIN;
     GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IPU;
-    GPIO_Init(GPIOB, &GPIO_InitStructure);
+    GPIO_Init(PIN_CAN2_RX_PORT, &GPIO_InitStructure);
 
     memset(can_chan, 0, sizeof(can_chan));
     can_chan[CAN_CH1].reg = CAN1;

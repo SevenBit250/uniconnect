@@ -12,6 +12,7 @@
 #include "boot.h"
 #include "bootproto.h"
 #include "flash_io.h"
+#include "bsp_led.h"
 #include <stdint.h>
 
 void boot_usb_init(void);
@@ -53,30 +54,6 @@ static void pmp_scrub(void)
 extern int main(void);
 void entry(void) { main(); }
 
-/* ---- LED: 仅STA灯(PB11, 高电平为灭, 同bsp_led) ---- */
-#define LED_STA_PORT   GPIOB
-#define LED_STA_PIN    GPIO_Pin_11
-
-static void led_init(void)
-{
-    GPIO_InitTypeDef g = {0};
-    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOB, ENABLE);
-    GPIO_SetBits(LED_STA_PORT, LED_STA_PIN);
-    g.GPIO_Pin = LED_STA_PIN;
-    g.GPIO_Mode = GPIO_Mode_Out_PP;
-    g.GPIO_Speed = GPIO_Speed_50MHz;
-    GPIO_Init(LED_STA_PORT, &g);
-}
-
-static void delay_ms(uint32_t ms)
-{
-    /* 粗延时(volatile循环), 仅LED节奏用; 144MHz下约8 cyc/迭代 */
-    while (ms--) {
-        for (volatile uint32_t i = 0; i < 16000; i++) {
-            __asm volatile("nop");
-        }
-    }
-}
 
 /* ---- APP有效性 ---- */
 
@@ -112,8 +89,11 @@ static void jump_to_app(void)
     RCC_AHBPeriphClockCmd(RCC_AHBPeriph_USBHS, DISABLE);
 
     NVIC_DisableIRQ(USBHS_IRQn);
-    delay_ms(20);
+    boot_delay_ms_blocking(20);         /* MIE=0上下文, 中断式delay会死等 */
 
+    boot_systick_stop();                  /* 关SysTick: IRQ使能在CTLR不在PFIC,
+                                           * pfic_scrub管不到, 不关则跳转窗口期
+                                           * 仍可能打进boot向量表 */
     pfic_scrub();                         /* 送APP一个干净NVIC(跳转非复位) */
     BOOT_STAGE(0xA1);
     __asm volatile("fence.i" ::: "memory");
@@ -138,13 +118,12 @@ int main(void)
 {
     boot_flag_t flag;
     uint8_t upgrade = 0;
-    uint32_t tick = 0;
 
     pmp_scrub();
     pfic_scrub();
     boot_capture_trap();
     SystemCoreClockUpdate();
-    led_init();
+    boot_led_init();
 
     /* BOINIT(软复位存活的RAM共享区): APP升级请求(读后即消费) */
     volatile boinit_t *bi = (volatile boinit_t *)BOINIT_BASE;
@@ -158,17 +137,19 @@ int main(void)
             upgrade = 1;                   /* 记录在但镜像坏 */
         }
     } else {
-        /* 无GOOD记录(openocd直烧APP的首刷场景): 仅凭签名放行 */
-        if (!app_sig_ok()) {
-            upgrade = 1;
-        }
+        /* 无GOOD记录: 一律进升级模式, 不跳转 [封板决策2026-10-03]
+         * 升级写入顺序=签名页最先落flash, 中断的首轮升级会留下"签名在而
+         * 镜像半写"的现场 -- 签名不能作为放行凭证, GOOD记录(len+crc)是
+         * 唯一放行凭证。代价: openocd直烧后设备停在boot, 出厂/开发流程
+         * 固化为 flash_all 后必跑一次 fw_update 写入首份GOOD(见AGENTS) */
+        upgrade = 1;
     }
 
     if (!upgrade) {
         jump_to_app();                     /* 不返回 */
     }
 
-    /* ---- 升级模式: STA灯快闪(5Hz) ---- */
+    /* ---- 升级模式: STA灯500ms周期快闪(SysTick基准, bsp_led) ---- */
     /* 裸机必须显式开全局中断: 启动代码mret进main时MPIE=0即MIE关(APP工程
      * 靠RT-Thread线程切换恢复MIE), 不开则USB中断全灭、枚举停摆(2026-10-02
      * 真机实锤: USBHS已初始化而主机枚举不出设备) */
@@ -176,19 +157,20 @@ int main(void)
     bootproto_reset();
     boot_usb_init();
 
+    uint32_t last_blink = 0;
     while (1) {
         boot_usb_pump();
         if (bootproto_jump_pending()) {
             /* 升级收尾走芯片复位而非跳转: 复位后boot按GOOD记录+签名正常
              * 引导APP, APP从POR干净态启动 -- 跳转入口的寄存器/RAM残留
              * 曾致CDC线控(EP0带数据阶段请求)时好时坏(2026-10-03实锚) */
-            delay_ms(50);                  /* 让REBOOT应答先到主机 */
+            boot_delay_ms(50);             /* 让REBOOT应答先到主机 */
             NVIC_SystemReset();
         }
-        if (++tick >= 20000) {             /* 与pump节拍叠加, 约5Hz */
-            tick = 0;
-            GPIO_WriteBit(LED_STA_PORT, LED_STA_PIN,
-                          (BitAction)!GPIO_ReadOutputDataBit(LED_STA_PORT, LED_STA_PIN));
+        if (boot_ms() - last_blink >= 250) {   /* 250ms翻转=500ms周期, 区别于
+                                                * APP未连USB的1s闪(状态可辨) */
+            last_blink += 250;
+            boot_led_sta_toggle();
         }
     }
 }

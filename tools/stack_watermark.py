@@ -6,10 +6,11 @@
 一次也会留痕)。栈真溢出时脏区会越过栈底, 同样能检出。
 
 用法:
-  python tools/stack_watermark.py            # dump并按map解析当前水位
-  python tools/stack_watermark.py --limit 60 # 额外要求利用率<60%
+  python tools/stack_watermark.py                     # dump并按map解析当前水位
+  python tools/stack_watermark.py --limit 60          # 额外要求利用率<60%
+  python tools/stack_watermark.py --map build-rel/uniconnect.map  # 指定map(默认build/, 与设备固件必须同构建!)
 输出: 各栈实占/利用率; 越限或覆盖不全退出码非0。
-依赖: openocd(wch-link) + build/uniconnect.map 与固件同步。
+依赖: openocd(wch-link) + map 与设备固件同步(跨构建错配=地址全错, 读数无效)。
 """
 import re
 import subprocess
@@ -19,6 +20,11 @@ import os
 OCD = r"C:\MounRiver\MounRiver_Studio2\resources\app\resources\win32\components\WCH\OpenOCD\OpenOCD\bin\openocd.exe"
 CFG = r"C:\MounRiver\MounRiver_Studio2\resources\app\resources\win32\components\WCH\OpenOCD\OpenOCD\bin\wch-riscv.cfg"
 MAP = os.path.join(os.path.dirname(__file__), "..", "build", "uniconnect.map")
+# --map 覆盖(多构建目录: build/=Debug, build-rel/=Release)
+_args = [a for a in sys.argv[1:] if not a.startswith("--limit")]
+for _i, _a in enumerate(_args):
+    if _a == "--map" and _i + 1 < len(_args):
+        MAP = _args[_i + 1]
 
 # 监视的栈符号(线程显示名 -> map符号)
 STACKS = {
