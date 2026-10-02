@@ -52,7 +52,7 @@ Mkfile.old
 dkms.conf
 
 sample
-obj
+
 
 # ===== ↑ 以上同步自 .gitignore（「从 .gitignore 同步」只重写以上部分）=====
 .git/
@@ -68,6 +68,7 @@ coverage/
 htmlcov/
 lcov-report/
 cmakefiles/
+/build*/
 cmake-build-*/
 bazel-*/
 pods/

@@ -52,10 +52,10 @@ Mkfile.old
 dkms.conf
 
 sample
-obj
+# MRS obj/ 已随 CMake 迁移退役
 
 # gen_makefile.sh 产物收集目录
-/build/
+/build*/
 
 # tools/ 运行产物(soak报告/ETW追踪/日志/缓存)
 tools/soak_result.txt
@@ -63,3 +63,4 @@ tools/*.etl
 tools/*.log
 tools/*_result.txt
 tools/__pycache__/
+.zcode/

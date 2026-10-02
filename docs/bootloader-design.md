@@ -76,14 +76,19 @@ APP 自身有效性（无旗标冷启动路径）：首字签名（APP Link.ld �
 ## 工程结构
 
 ```
-boot/            ← 新增: 独立 MRS 风格工程(裸机), gen方式同根工程
+boot/            ← 独立裸机固件工程(CMake 目标 boot.elf, boot/boot.ld 20KB分区)
   User/main.c    状态机: 查旗标→跳APP/HID升级循环
   User/bootproto.c 协议+页缓冲+CRC32
   User/flash_io.c  厂商库快编程薄封装(时钟守卫+ENHANCE_MOD守卫)
-  复用: CherryUSB(osal_none) + 厂商外设库(共享源码树, 独立obj)
-根工程(APP)      Link.ld ORIGIN=0x5000 + dap_thread Vendor0 拦截 + 旗标写入
+  User/usb_glue.c  单HID描述符+裸机泵(CONFIG_USB_BAREMETAL 共用端口驱动)
+  复用: CherryUSB(core+hid) + common/ 厂商库最小集(接口源集)
+app/             ← APP 固件工程(CMake 目标 uniconnect.elf, app/app.ld ORIGIN=0x5000)
+  Application/dap_thread.c Vendor0 拦截 + User/main.c .appsig + User/boot_shared.h 触发
+common/boot_shared.h  BOINIT/旗标页/APP_SIG_MAGIC 单一事实源(已收敛于此)
 tools/fw_update.py  两阶段升级工具
 ```
+
+构建: `cmake --build build --target boot.elf|uniconnect.elf|flash_all`（2026-10-03 CMake 化）
 
 ## 风险与回退
 

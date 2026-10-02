@@ -4,25 +4,28 @@ UniConnect：基于 CH32V305CCT6（RISC-V，主频 144MHz）的 CMSIS-DAP 调试
 
 ## 构建与调试
 
-- IDE 为 MounRiver Studio (MRS) 2.3.0（Eclipse CDT 托管构建），项目配置在 `.project` / `.cproject`，勿手改 `obj/` 下自动生成的 makefile。
-- 命令行构建（推荐）：仓库根 `bash gen_makefile.sh` 一次性生成 `obj/GNUmakefile`（继承 MRS makefile + 工具链 PATH 注入 + build/ 产物收集）和根 `Makefile` 转发层，之后根目录直接 `make`（产物 elf/bin/hex/map 收集到 `build/`）、`make flash`（openocd + wch-link 烧录）、`make clean`。make 本体不在 PATH 时先 `export PATH="/c/MounRiver/MounRiver_Studio2/resources/app/resources/win32/others/Build_Tools/Make/bin:$PATH"`。
-- 直接用 MRS 原始 makefile：`cd obj && make all`（必须 `make all`，裸 `make` 行为不对；工具链需自行注入 PATH）。
-- 不依赖 IDE 的本地构建：工具链在 `C:\MounRiver\MounRiver_Studio2\resources\app\resources\win32\components\WCH\Toolchain\RISC-V Embedded GCC\bin`，make 在同目录树的 `...\win32\others\Build_Tools\Make\bin`，openocd 及 `wch-riscv.cfg` 在 `...\win32\components\WCH\OpenOCD\OpenOCD\bin`。仓库被移动后重跑 `gen_makefile.sh` 即自愈 GNUmakefile 里的 Link.ld 绝对路径（`obj/**/*.d` 里的绝对路径仍会重新生成）。
+- 构建系统：**CMake + Ninja**（2026-10-03 从 MRS/make 迁移，MRS 已退役；迁移时做过符号级等价验证：APP 418/418、boot 191/191 符号大小与 make 基线全同）。仓库根：
+  - `cmake -B build -G Ninja`（一次配置；toolchain 自动挂载，ninja 经 `pip install ninja`）
+  - `cmake --build build`——app+boot 全建，产物 `build/uniconnect.{elf,bin,hex,map}` 与 `build/boot.{elf,bin,hex,map}`（`fw_update.py` 消费 bin、`stack_watermark.py` 消费 map，路径约定不变）
+  - `cmake --build build --target uniconnect.elf` / `boot.elf`——单建
+  - `cmake --build build --target flash_app / flash_boot / flash_all`——openocd+wch-link 烧录（**烧后若 USB 不重枚举需物理重插 POR**；`flash erase_address` 禁用=整片擦）
+- 构建类型：`-DCMAKE_BUILD_TYPE=Debug`（默认，`-O0 -g`，对齐全部历史性能验证位）/ `Release`（`-Os`）。**boot 的 Debug 特例映射 `-O1`**（-O0 实测 32512B 溢 20KB 分区 12KB，链接面已是最小集 cherryusb_core+hid，见 boot/CMakeLists.txt 注释）。**切换 Release 属独立流程：需全回归（CDC/CAN/DAP/fw_update）+ stack_watermark 栈水位**。
+- 工具链与烧录路径默认取 MRS 安装位置，可用环境变量 `TOOLCHAIN_BIN` / `OPENOCD_BIN` 覆盖（见 `cmake/toolchain.cmake`、`cmake/flash.cmake`）；工具链本体在 `C:\MounRiver\MounRiver_Studio2\resources\app\resources\win32\components\WCH\Toolchain\RISC-V Embedded GCC\bin`，openocd 及 `wch-riscv.cfg` 在 `...\win32\components\WCH\OpenOCD\OpenOCD\bin`。
+- CMake 架构：各模块（CherryUSB 类驱动/端口、厂商库 hal_full/hal_min、RT-Thread、boot_shared）一律 **INTERFACE 源集**——源码随消费者目标编译，优化等级与宏（如 `CONFIG_USB_BAREMETAL`）按固件目标生效；`usb_dc_usbhs.c` 由 boot 直挂源+私有宏实现同文件双编译。
+- 旧 make 体系（gen_makefile.sh/根 Makefile/obj/GNUmakefile/subdir.mk/.cproject）已随迁移删除，MRS 工程文件不再维护。
 - 官方 EVT 例程参考：`C:\Users\25293\Desktop\aiworkspace\CH32V307EVT\EVT\EXAM`（USBHS 双缓冲/CDC 例程展示了官方推荐的落块模式）。
 - 工具链：RISC-V Cross GCC，`-Os`，架构 RV32IMA + C（压缩指令）。
 - 烧录/调试配置：`uniconnect.launch`（OpenOCD/wch-link）。
 
-## 目录与分层（自上而下只允许向下依赖）
+## 目录与分层（自上而下只允许向下依赖；app/boot/common/third_party 四分法）
 
-- `User/` — `main()` 仅空循环，系统状态机（`system_status_t`，main.h）；`config.h` 集中定义各线程优先级与栈大小；中断处理在 `ch32v30x_it.c`。
-- `App/` — RT-Thread 线程层：`cdc_uart_thread.c`（CDC↔UART 双向块缓冲零拷贝桥，tx/rx/ctrl 三线程）、`dap_thread.c`（CMSIS-DAP 命令泵，USB 请求/响应队列）、`monitor_thread.c`（统一 LED 管理 + 看门狗：SYS 心跳/流水、COM/CAN1/CAN2 吞吐活动灯按 g_dbg 计数器 10ms 轮询最小亮 30ms、线控确认双闪，数据路径零 LED 代码）。
-- `Bsp/` — 硬件抽象层，App 只准通过 `bsp_*` API 访问硬件，不直接调外设库；**依赖方向严格单向向下**（2026-10-01 解耦重构：曾数据面混在 bsp_usb.c 且 extern App 回调/替 App 初始化信号量，现已各归其主）。`device/{can,led,uart,usb}/` 各含外设驱动 `.c/.h`；`components/block_buffer_pool/`（`bsp_pool`，通用块缓冲池组件，FREE→LANDING→READY→OUT 状态机，关中断临界区内只做索引运算；UART RX 与 CDC OUT 两条高速通路的数据缓冲全部走它，块首恒 4 字节对齐）、`components/watchdog/`（金丝雀+OUT DMA 指向注册制监护+黑匣子）。`bsp_config.h` 与伞头 `bsp.h` 留在 `Bsp/` 根，集中定义 USB 端点地址（DAP_IN 0x81 / DAP_OUT 0x02 / CDC_IN 0x82 / CDC_OUT 0x04）、VID/PID (0x0D28/0x0218) 及两个块池的块尺寸/池深。
-- **USB 数据面归属（2026-10-01 解耦）**：`Bsp/device/usb/bsp_usb.c` 只做设备层（描述符表=设备级复合布局、按描述符顺序注册接口端点、事件分发钩子）；CDC/CAN/DAP 的数据面分别在 `App/cdc_uart_thread.c`、`App/can_bridge_thread.c`、`App/dap_thread.c`，各自在 INIT_COMPONENT 阶段填充句柄（ep_addr/ep_cb/cfg_cb 钩子，早于 bsp_usb 层 INIT_ENV 的 usbd_initialize）完成向下注册；CONFIGURED 事件经钩子触发各数据面自愈（重开端点/重挂 OUT 池/挂首包）。新增 Bsp 源文件须放入对应 device/components 子目录并在 obj 下配 subdir.mk（可参考 obj/Bsp/device/can/subdir.mk 模板，或让 MRS 重新生成）。
-- `Dap/` — CMSIS-DAP 官方源码（DAP.c/SW_DP.c/DAP_queue.c 等），硬件相关全部在 `DAP_config.h`（CPU_CLOCK=144MHz，SWD/JTAG 引脚映射）。
-- `CherryUSB/` — vendored 的 CherryUSB v1.51 协议栈（非子模块，可直接改），CH32 移植层在 `port/ch32/ch32hs/`，通过 `osal/` 对接 RT-Thread。
-- `RtthreadNano/` — RT-Thread Nano 子模块（github rtthread-nano）。
-- `RtthreadNanoPatch/` — 对 Nano 子模块的补丁层（board.c、completion.c、rtconfig.h、libcpu 上下文切换汇编）。include 路径中 Patch 优先于子模块，改 RT-Thread 行为应改这里，不要动子模块。
-- `Core/` `Peripheral/` `Startup/` `Ld/` — CH32V30x 厂商驱动库、启动文件、链接脚本，一般不改。
+- `app/` — **APP 固件工程**（RT-Thread 全功能，flash@0x5000）：`Application/` 线程层（`cdc_uart_thread.c` CDC↔UART 双向块缓冲零拷贝桥 tx/rx/ctrl 三线程、`dap_thread.c` CMSIS-DAP 命令泵、`can_bridge_thread.c` CAN 桥、`monitor_thread.c` 统一 LED 管理+看门狗）；`Bsp/` 硬件抽象层（App 只准通过 `bsp_*` API 访问硬件，不直接调外设库，**依赖方向严格单向向下**；`device/{can,led,uart,usb,dap}/` 外设驱动、`components/block_buffer_pool/`（`bsp_pool` 块缓冲池，FREE→LANDING→READY→OUT 状态机）、`components/watchdog/`（金丝雀+OUT DMA 注册制监护+黑匣子）；`bsp_config.h`/伞头 `bsp.h` 在 `Bsp/` 根，集中定义 USB 端点地址与 VID/PID）；`Dap/` CMSIS-DAP 官方源码（硬件相关全在 `DAP_config.h`，CPU_CLOCK=144MHz）；`User/`（`main()` 空循环+`.appsig` 签名字、`config.h` 集中线程优先级/栈大小、`ch32v30x_it.c` 中断、`debug.c`）；`app.ld` 链接脚本（0x5000/232K+BOINIT 区+RAM 52K+`.appsig` 段）。
+- `boot/` — **bootloader 固件工程**（裸机无 RTOS，flash@0x0/20KB）：`User/`（`main.c` 启动决策+跳转、`bootproto.c` 升级协议、`flash_io.c` 快编程 0x08 别名封装、`usb_glue.c` 单 HID 描述符+裸机泵、`boot_it.c` 中断兜底、`system_ch32v30x.c` **96MHz 有意分叉**——flash 擦写时钟红线）；`boot.ld`（20K+BOINIT+ASSERT 溢出兜底）。
+- `common/` — **app+boot 公共层**：`Core/`、`Peripheral/`（厂商库；APP 编全集 26 个外设 .c=`ch32_hal_full`，boot 编最小集 rcc/gpio/flash/misc=`ch32_hal_min`，CMake 接口源集区分）；`Startup/`（`startup_ch32v30x_D8C.S`=APP 用、`_D8.S`=boot 用）；`boot_shared.h`（BOINIT 共享区/旗标页/`APP_SIG_MAGIC` 单一事实源，改布局需同步 app.ld/boot.ld/本头三方）；`system_ch32v30x.h`（.c 两侧有意分叉：APP 144M/boot 96M，头共享）。
+- `third_party/` — `CherryUSB/`（vendored v1.51 非子模块可直接改；CH32 移植层在 `port/ch32/ch32hs/`，经 `osal/usb_osal_rtthread.c` 对接 RT-Thread；模块化 CMake 接口源集在此目录）；`RtthreadNano/`（**vendor 化收编**，2026-10-03 由 git 子模块转普通目录，固定 v3.1.5，防上游变动）；`RtthreadNanoPatch/`（Nano 补丁层：board.c、completion.c、rtconfig.h、libcpu 上下文切换汇编；`rtthread` CMake 接口源集在此定义——只编 Nano `rt-thread/src` 15 个内核 .c + Patch 副本，改 RT-Thread 行为改这里）。
+- `cmake/` — `toolchain.cmake`（riscv-none-embed 工具链，`TOOLCHAIN_BIN` 可覆盖）+ `flash.cmake`（flash_app/flash_boot/flash_all）。
+- `tools/`/`docs/` — 测试诊断工具（见 `tools/README.md`）与设计文档；产物目录 `build/`（gitignored）。
+- **USB 数据面归属（2026-10-01 解耦）**：`app/Bsp/device/usb/bsp_usb.c` 只做设备层（描述符表=设备级复合布局、按描述符顺序注册接口端点、事件分发钩子）；CDC/CAN/DAP 的数据面分别在 `app/Application/{cdc_uart_thread,can_bridge_thread,dap_thread}.c`，各自在 INIT_COMPONENT 阶段填充句柄（ep_addr/ep_cb/cfg_cb 钩子，早于 bsp_usb 层 INIT_ENV 的 usbd_initialize）完成向下注册；CONFIGURED 事件经钩子触发各数据面自愈（重开端点/重挂 OUT 池/挂首包）。新增 Bsp 源文件放入对应 device/components 子目录后，**还需加入 `app/CMakeLists.txt` 的 add_executable 源清单**。
 
 ## 启动流程
 
@@ -30,7 +33,6 @@ UniConnect：基于 CH32V305CCT6（RISC-V，主频 144MHz）的 CMSIS-DAP 调试
 
 ## 已知坑
 
-- **Windows 原生 make 的 `$(PATH)` 恒为分号形式**：Git Bash 启动原生 make.exe 时 MSYS 会把 PATH 环境变量自动转成 `C:\...;C:\...` 形式，makefile 里 `export PATH := /c/xxx:$(PATH)` 会拼出冒号+分号混合的废 PATH（bundled sh 报工具 not found，且 `/c/` 挂载形式它也不认）。正确做法见 `gen_makefile.sh` 生成的 GNUmakefile：路径用 `C:/` 正斜杠形式 + `$(findstring ;,$(PATH))` 探测分隔符再拼接。
 
 - **[致命] CH32V30x DMA Normal 模式 CNTR=0 静止态狂奔**：块满 TC 后通道处于 EN=1/CNTR=0，该系列（与 STM32 不同！）此时若外设请求挂起会以 65536 计数从旧地址连续狂读/狂写 RAM（已实测涂烂 34KB bss）。对策：RX 用 **CIRCULAR 模式乒乓双块**（DMA 永不停转）；TX 用 **DMAT 门控**（TC4 ISR 第一时间关 DMAT+EN，TC4 中断设为最高抢占优先级 0）。新接任何 DMA 通道必须遵循这两种模式之一。
 - **[致命] HPE 硬件栈在高密度中断下弹出错位**（黑匣子实锤：保存的 mstatus 值 0x7800 被恢复进 pc/ra → mcause=2 野跳转）。已在启动代码 `csrw 0x804, 0x3f` 关闭 HPE 硬件栈（bit5），fast 属性处理器兼容。
@@ -68,16 +70,16 @@ UniConnect：基于 CH32V305CCT6（RISC-V，主频 144MHz）的 CMSIS-DAP 调试
 
 ## 开发铁律
 
-- **[铁律·自杀性测试禁令（2026-10-01 实锚案例）]** 任何可能切断芯片自身恢复途径的操作（SWJ_Disable 关调试口、关 USB 而它是唯一烧录通路、PFIC 调试位、看门狗不可喂等），**禁止未经“已验证的恢复路径”就上真机测试**——且必须先自问“这代码若每次开机都跑，我还能不能烧录”。本板无 BOOT 测试点，SDI 一断只能物理抢救。具体地：**CH32V305 上 `GPIO_Remap_SWJ_Disable` 会在运行期切断两线 SDI 调试口（wch-link 立即失联），且 PB3/PB4 默认即可作 GPIO/SPI 复用，永远不需要它**——Bsp/device/dap/bsp_dap.c 已彻底移除并留注释。
+- **[铁律·自杀性测试禁令（2026-10-01 实锚案例）]** 任何可能切断芯片自身恢复途径的操作（SWJ_Disable 关调试口、关 USB 而它是唯一烧录通路、PFIC 调试位、看门狗不可喂等），**禁止未经“已验证的恢复路径”就上真机测试**——且必须先自问“这代码若每次开机都跑，我还能不能烧录”。本板无 BOOT 测试点，SDI 一断只能物理抢救。具体地：**CH32V305 上 `GPIO_Remap_SWJ_Disable` 会在运行期切断两线 SDI 调试口（wch-link 立即失联），且 PB3/PB4 默认即可作 GPIO/SPI 复用，永远不需要它**——app/Bsp/device/dap/bsp_dap.c 已彻底移除并留注释。
 - **[铁律] 遇到顽固 bug 必须调用 `engineering-method` skill（用户级 `~/.zcode/skills/engineering-method/`），不得凭惯性继续排查**。触发线（任一）：同一故障第 2 个假说死亡；开始怀疑 OS 补丁/硅级 bug/竞态/"玄学"等外因；"已排除"的结论被反复拿出来重审；修了真实缺陷但原始症状纹丝不动。触发后停止生产新假说，按 skill 的四条增量纪律执行：排除结论必须带覆盖清单、外因假说须机制或对照实验、修复≠根因（正交缺陷陷阱）、真值三源对照（规范表格/vendored 常量/真机抓包）。MS OS 2.0 免驱排查（根因 2 字节、疑点十几个、耗时数周）是其锚点案例，翻车详情见 skill 的 references。
 
 ## 约定
 
 - 注释、commit message、文档用中文；commit 风格见 `git log`（短中文描述）。
-- 命名：厂商库 `ch32v30x_` 前缀，BSP 层 `bsp_` 前缀（`Bsp/inc` + `Bsp/src`），RT-Thread 用 `rt_` 前缀，应用层小写下划线。
+- 命名：厂商库 `ch32v30x_` 前缀，BSP 层 `bsp_` 前缀（`app/Bsp`），RT-Thread 用 `rt_` 前缀，应用层小写下划线。
 - 调试输出用 `rt_kprintf()`；USB 协议栈日志走 `CONFIG_USB_PRINTF()` 宏。
 - 状态 LED 共 5 个（STA/SWD(DAP)/COM/CAN1/CAN2），统一通过 `bsp_led_ctrl/toggle` 操作，高电平为灭。**灯语（2026-10-02 定稿，monitor 线程唯一渲染，数据路径零 LED 代码）**：STA=USB 未连接 1s 周期闪烁/连接后常亮；四个功能灯=未 open 灭、open 无数据常亮、有数据 200ms 固定间隔闪烁（活动窗口增量优先于 open 标志）。**open 信号源**：COM=主机 DTR（强符号覆盖 CherryUSB `__WEAK usbd_cdc_acm_set_dtr` 写 `g_led_open.com`，USB RESET 清零）；DAP=官方 `DAP_HostStatus` 命令（DAP.c→`LED_CONNECTED_OUT` 宏改写 `g_led_open.dap_conn`，OpenOCD 会话进出发 connected=1/0，CONFIGURED 清零兜底）；CAN1/2=硬件通道模式（`bsp_can_get_mode != SLEEP`，SET_MODE 驱动）。活动计数源：g_dbg（COM=uart_submits+tx_dma，CAN=canN_tx+rx）、`g_dap_dbg[1]`（DAP OUT 回调）。
-- 新线程的优先级/栈大小必须加到 `User/config.h`，不要在源文件里写魔数。
+- 新线程的优先级/栈大小必须加到 `app/User/config.h`，不要在源文件里写魔数。
 
 ## 当前进度（2026-10）
 
@@ -86,6 +88,7 @@ UniConnect：基于 CH32V305CCT6（RISC-V，主频 144MHz）的 CMSIS-DAP 调试
 - **LED 灯语系统（2026-10-02 落地）**：monitor 线程统一渲染 5 灯（STA 1s 闪/常亮；COM/DAP/CAN1/2 灭/常亮/200ms 闪），open 信号锚定硬件/协议语义（DTR/HostStatus/CAN 模式），历经回环+真总线+混压回归全绿。
 - MS OS 2.0 免驱：根因（描述符类型字段违反规范表 9）已修，真机免驱绑定 WinUSB 验证 PASS。
 - **DAP bulk v2 通路已打通（2026-10-01）**：接口 2（"CMSIS-DAP"），OpenOCD 不接目标板可读完整 link 信息（v2/SWD/Atomic/FW 2.1.1/引脚状态），与 CAN 回归双绿。
-- DAP/SWD：**全链路已打通（2026-10-01 真机验证）**：SWD 引脚引擎 `Bsp/device/dap/bsp_dap.{c,h}`（SWCLK=PB3/SWDIO=PB5，GPIO 位拍为**现役引擎**，有效 SWCLK ~5.3MHz）；对 STM32F103C8T6 真机完成 DP/AP 全枚举（DPIDR=0x1BA01477，Cortex-M3 r1p1，6 断点 4 观察点）。**全功能测试 PASS（同日）**：halt/resume/step、内核寄存器、RAM 读写回环、硬件断点（FPB 精确命中 Reset_Handler）、数据观察点（DWT 捕获 .data 写）、flash 读/全擦/编程/128KB 逐字节校验全循环、SWD 时钟 2/4/8MHz 全稳定（实测验证吞吐 59KiB/s@4MHz；DAP_THREAD_STACK 因此 1024→1536，压测水位 672B）。**SPI 加速暂存**：v1 板缺 MISO 桥接（全双工+串联电阻路线需 PB4 直连 SWDIO、PB5 经 ~1K 电阻），完整调查与 v2 恢复步骤见 `docs/spi-accel-swd-worklog.md`；引擎骨架与 `BSP_DAP_USE_SPI` 宏已在库。WCH 版 openocd 的 target/*.cfg 有损坏的脚本搜索前缀，勿用 `-f target/stm32f1x.cfg`，用手工 DAP 声明（命令已固化 tools/README.md）。
-- **USB bootloader 已落地并全流程验证（2026-10-03，`docs/bootloader-design.md`）**：分区 boot@0x0(≤20KB 裸机)/APP@0x5000(.appsig 魔法字)/旗标页@0x3F000；触发链 = APP 侧 dap_thread 拦截 `ID_DAP_Vendor0` → 写 BOINIT RAM 旗标（0x2000D000，软复位存活）→ `NVIC_SystemReset`；boot 态 = 单 HID（PID 0x0219 "UniConnect Bootloader"）走 GET_INFO/BEGIN/PROGRAM/FLUSH/VERIFY/END/REBOOT 协议。**端到端实锚全绿**：APP 触发→boot 传输 78KB/6.4s→CRC32→REBOOT 回 APP（连续两轮），升级后 CDC 回环 11/11 + DAP link + 双路 CAN 2000 帧全 PASS。APP 侧三件套在 Ld/Link.ld（平移 0x5000/232K + RAM 52K + BOINIT 区）、User/main.c（.appsig）、App/dap_thread.c（Vendor0 拦截）；`APP_SIG_MAGIC` 单一事实源在 `User/boot_shared.h`。开发期注意：boot/APP 双 program 后需人工 POR；调试进 boot 可用 openocd `mww 0x2000D000 0x5AA55AA5` + `reset run`（无 flash 操作安全）配合 fw_update `--skip-trigger`，全程无需物理操作。boot 自带诊断：SETUP 环形日志 @0x2000C800 + pump 计数 @[65]。
+- DAP/SWD：**全链路已打通（2026-10-01 真机验证）**：SWD 引脚引擎 `app/Bsp/device/dap/bsp_dap.{c,h}`（SWCLK=PB3/SWDIO=PB5，GPIO 位拍为**现役引擎**，有效 SWCLK ~5.3MHz）；对 STM32F103C8T6 真机完成 DP/AP 全枚举（DPIDR=0x1BA01477，Cortex-M3 r1p1，6 断点 4 观察点）。**全功能测试 PASS（同日）**：halt/resume/step、内核寄存器、RAM 读写回环、硬件断点（FPB 精确命中 Reset_Handler）、数据观察点（DWT 捕获 .data 写）、flash 读/全擦/编程/128KB 逐字节校验全循环、SWD 时钟 2/4/8MHz 全稳定（实测验证吞吐 59KiB/s@4MHz；DAP_THREAD_STACK 因此 1024→1536，压测水位 672B）。**SPI 加速暂存**：v1 板缺 MISO 桥接（全双工+串联电阻路线需 PB4 直连 SWDIO、PB5 经 ~1K 电阻），完整调查与 v2 恢复步骤见 `docs/spi-accel-swd-worklog.md`；引擎骨架与 `BSP_DAP_USE_SPI` 宏已在库。WCH 版 openocd 的 target/*.cfg 有损坏的脚本搜索前缀，勿用 `-f target/stm32f1x.cfg`，用手工 DAP 声明（命令已固化 tools/README.md）。
+- **USB bootloader 已落地并全流程验证（2026-10-03，`docs/bootloader-design.md`）**：分区 boot@0x0(≤20KB 裸机)/APP@0x5000(.appsig 魔法字)/旗标页@0x3F000；触发链 = APP 侧 dap_thread 拦截 `ID_DAP_Vendor0` → 写 BOINIT RAM 旗标（0x2000D000，软复位存活）→ `NVIC_SystemReset`；boot 态 = 单 HID（PID 0x0219 "UniConnect Bootloader"）走 GET_INFO/BEGIN/PROGRAM/FLUSH/VERIFY/END/REBOOT 协议。**端到端实锚全绿**：APP 触发→boot 传输 78KB/6.4s→CRC32→REBOOT 回 APP（连续两轮），升级后 CDC 回环 11/11 + DAP link + 双路 CAN 2000 帧全 PASS。APP 侧三件套在 `app/app.ld`（平移 0x5000/232K + RAM 52K + BOINIT 区）、`app/User/main.c`（.appsig）、`app/Application/dap_thread.c`（Vendor0 拦截）；`APP_SIG_MAGIC` 单一事实源在 `common/boot_shared.h`。开发期注意：boot/APP 双 program 后需人工 POR；调试进 boot 可用 openocd `mww 0x2000D000 0x5AA55AA5` + `reset run`（无 flash 操作安全）配合 fw_update `--skip-trigger`，全程无需物理操作。boot 自带诊断：SETUP 环形日志 @0x2000C800 + pump 计数 @[65]。
+- **CMake 化 + 目录四分法重组（2026-10-03 落地）**：`app/`（APP 固件）/`boot/`（boot 固件）/`common/`（Core+Peripheral+Startup+boot_shared.h+system 头）/`third_party/`（CherryUSB+RtthreadNano **vendor 化收编**（去子模块固定 v3.1.5）+Patch）；构建=CMake+Ninja（模块=INTERFACE 源集，flash_app/flash_boot/flash_all 烧录目标）。**等价性已验**：APP 418/418、boot 191/191 符号大小与 make 基线全同（text 差为链接顺序 padding），编译 flag 逐项核对一致；boot Debug 特例 -O1（-O0 溢 20KB 分区，19240B/94%）。RtthreadNano 子模块身份已移除，`.gitmodules` 删除。
 - 下一步：SWD 深化（halt/读写内存/闪存算法）、DAP 加速引擎（SPI 后端）、CAN 接口改第二 CDC 量产路线评估、boot 冻结定型（改动前评估必要性）。
