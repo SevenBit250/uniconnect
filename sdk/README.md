@@ -2,7 +2,7 @@
 
 UniConnect 探针的宿主动态库：**uniconnect_upgrade**（固件升级）与 **uniconnect_can**（CAN 通讯），C ABI，跨语言可调（C/C++/C#/Python/LabVIEW…）。
 
-> **实现状态（2026-10-03 第 1 期）**：构建/ABI/交付面已定型并全部通过冒烟测试；`fwu_device_state`、两库生命周期与错误码为**真实现**，USB 传输协议函数（触发/传输/收发）返回 `UNI_ERR_NOT_SUP`，第 2/3 期接入 libusb/hidapi 后逐函数点亮（接口不变）。
+> **实现状态（2026-10-03 第 2 期）**：**uniconnect_can 数据面已真实现并真机验证**——libusb v1.0.30 vendored 静态链入（交付面零新增 DLL），双通道静默回环 + 真总线交叉 200 帧/向逐帧校验 + 设备计数对账全 PASS（`tests/can_hw_test.c`，与 `tools/can_usb_test.py` 差分双绿）。uniconnect_upgrade 的 USB 传输（触发/烧写）返回 `UNI_ERR_NOT_SUP`，第 3 期接 hidapi 后点亮（接口不变）；boot HID 通路同批。
 
 ## 获取与构建
 
@@ -121,7 +121,10 @@ python sdk/example/can_gui.py        # CAN 工具：双通道面板，覆盖 can
 ## 测试
 
 ```bash
-cmake --build build/sdk-host --target test    # CTest: ABI往返 + 交付头自包含
+cmake --build build/sdk-host --target test   # CTest: ABI往返 + 交付头自包含(无需设备)
+
+# 真机CAN回归(需设备在线, 与tools/can_usb_test.py差分): 静默回环+真总线交叉+计数对账
+cd build/sdk-host && PATH="$PWD:$PATH" ./tests/can_hw_test.exe 200
 ```
 
 ## 目录

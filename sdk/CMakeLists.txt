@@ -17,6 +17,9 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 # 固件协议头单一事实源(host-safe 契约, 构建即检测)
 set(FW_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
+# 传输后端: vendored libusb v1.0.30 静态链入(交付面零新增dll), LGPL随仓库vendored
+add_subdirectory(${FW_ROOT}/third_party/libusb ${CMAKE_BINARY_DIR}/libusb-build)
+
 # 交付头聚合: 5头(源) -> 3头(交付, 自包含, uniconnect_*): 内联固件同源头
 set(UNI_DIST_INCLUDE ${CMAKE_BINARY_DIR}/dist-include)
 execute_process(COMMAND ${CMAKE_COMMAND} -E env python ${CMAKE_CURRENT_SOURCE_DIR}/amalgamate.py
@@ -31,6 +34,7 @@ function(uni_add_dll name)
         ${FW_ROOT}/boot/User       # boot.h(HID升级协议)
     )
     target_compile_definitions(${name} PRIVATE UNI_SDK_BUILD)
+    target_link_libraries(${name} PRIVATE uni_libusb)   # libusb静态链+winusb/setupapi/cfgmgr32
     set_target_properties(${name} PROPERTIES PREFIX "")   # uniconnect_can.dll 而非 libuniconnect_can.dll
     target_compile_options(${name} PRIVATE -Wall -Wextra)
 
