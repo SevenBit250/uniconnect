@@ -12,6 +12,8 @@
 #ifndef UNICONNECT_COMMON_H
 #define UNICONNECT_COMMON_H
 
+#include <stddef.h>   /* size_t: 交付头自包含(严格模式clang不隐式带入) */
+
 #ifdef __cplusplus
 extern "C" {
 #endif
