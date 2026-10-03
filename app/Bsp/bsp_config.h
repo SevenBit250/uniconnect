@@ -1,16 +1,18 @@
 #ifndef __BSP_CONFIG_H
 #define __BSP_CONFIG_H
 
-/*!< endpoint address */
-#define DAP_IN_EP          0x81
-#define DAP_OUT_EP         0x02
+#include "usb_ids.h"   /* VID/PID/DAP与CAN端点单一事实源(common/, SDK共用) */
+
+/*!< endpoint address(别名, 值在 common/usb_ids.h) */
+#define DAP_IN_EP          UNI_DAP_IN_EP
+#define DAP_OUT_EP         UNI_DAP_OUT_EP
 
 #define CDC_IN_EP          0x82
 #define CDC_OUT_EP         0x04
 #define CDC_INT_EP         0x85
 
-#define USBD_VID           0x0D28
-#define USBD_PID           0x0218
+#define USBD_VID           UNI_VID
+#define USBD_PID           UNI_PID_APP
 #define USBD_MAX_POWER     500
 #define USBD_LANGID_STRING 1033
 
@@ -55,9 +57,9 @@
 #define CAN_TX_RING_LEN      28u    /* 每通道发送帧环深度: USB全速灌批时1M波特率清环需2.6ms/20帧, 16深溢出(实测每20帧丢2) */
 #define CAN_RX_RING_LEN      16u    /* 每通道接收帧环深度 */
 
-/* CAN桥USB接口(WinUSB厂商bulk, 单接口双路复用) */
-#define CAN_IF_IN_EP         0x83
-#define CAN_IF_OUT_EP        0x06
+/* CAN桥USB接口(WinUSB厂商bulk, 单接口双路复用; 端点别名, 值在usb_ids.h) */
+#define CAN_IF_IN_EP         UNI_CAN_IN_EP
+#define CAN_IF_OUT_EP        UNI_CAN_OUT_EP
 #define CAN_USB_BLOCK_SIZE   512u   /* = USB HS bulk MPS */
 #define CAN_USB_OUT_BLOCKS   4u     /* OUT(usb->can)块池深 */
 #define CAN_USB_IN_BLOCKS    2u     /* IN(can->usb)拼装块: 在途1+拼装1轮转 */

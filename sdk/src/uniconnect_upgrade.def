@@ -1,0 +1,14 @@
+; fw_upgrade.dll 导出清单(ABI 显式契约; 增函数只追加, 勿删改)
+; 同时作为 dlltool 生成 MSVC 导入库(.lib)的输入
+LIBRARY uniconnect_upgrade
+EXPORTS
+    fwu_abi_version
+    fwu_strerror
+    fwu_open
+    fwu_close
+    fwu_trigger_bootloader
+    fwu_wait_bootloader
+    fwu_flash
+    fwu_reboot
+    fwu_upgrade_file
+    fwu_device_state

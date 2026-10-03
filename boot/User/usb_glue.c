@@ -7,9 +7,10 @@
 #include "usbd_hid.h"
 #include "boot.h"
 #include "bootproto.h"
+#include "usb_ids.h"   /* VID/PID单一事实源(common/, 与APP/SDK共用) */
 
-#define USBD_VID_BOOT     0x0D28
-#define USBD_PID_BOOT     0x0219
+#define USBD_VID_BOOT     UNI_VID
+#define USBD_PID_BOOT     UNI_PID_BOOT
 #define USBD_MAX_POWER    50
 
 /* EP: 接口0, OUT=0x01 / IN=0x81, 中断传输64B/1ms */

@@ -12,6 +12,7 @@
 | SWD 目标调试 | ✅ | 对 STM32F103 完成全功能验证（断点/观察点/闪存算法），有效 SWCLK ~5.3MHz |
 | USB 固件升级 | ✅ | APP 触发 → HID 传输 → CRC 校验 → 回 APP 全闭环，封板级加固 |
 | LED 灯语 | ✅ | 5 灯状态系统（open/活动语义），boot 态 500ms 快闪可辨 |
+| 宿主 SDK | 🚧 | uniconnect_upgrade / uniconnect_can 动态库（C ABI，`cmake --build build` 一并产出，协议实现第 2/3 期点亮） |
 
 ## 快速开始
 
@@ -61,6 +62,7 @@ common/         公共层：pin.h（全板引脚单一事实源）、Core/Periph
 third_party/    CherryUSB（vendored v1.51）、RtthreadNano（vendor 化 v3.1.5）、
                 RtthreadNanoPatch（补丁层）
 cmake/          toolchain.cmake + flash.cmake（烧录目标）
+sdk/            宿主 SDK 动态库（uniconnect_upgrade/uniconnect_can，C ABI，见 sdk/README.md）
 tools/          测试/诊断/升级工具（见 tools/README.md）
 docs/           设计文档（bootloader 设计、SPI 加速调查等）
 ```

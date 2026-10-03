@@ -45,3 +45,6 @@ add_subdirectory(app)
 add_subdirectory(boot)
 
 include(cmake/flash.cmake)
+
+# 宿主SDK动态库(嵌套构建, ALL=随 cmake --build build 一起出): 见 sdk/host.cmake
+include(sdk/host.cmake)

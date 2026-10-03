@@ -1,0 +1,14 @@
+; can_comm.dll 导出清单(ABI 显式契约; 增函数只追加, 勿删改)
+LIBRARY uniconnect_can
+EXPORTS
+    can_abi_version
+    can_strerror
+    can_open
+    can_close
+    can_set_mode
+    can_set_bitrate
+    can_send
+    can_recv
+    can_flush_rx
+    can_get_status
+    can_get_info
