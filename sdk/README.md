@@ -27,7 +27,7 @@ include/uniconnect_upgrade.h / uniconnect_can.h / uniconnect_common.h   # 三个
 - `.lib`：dlltool 生成的 COFF 导入库，**MSVC 链接器可直接用**
 - `.dll.a`：GNU 工具链（gcc/clang）用导入库
 - `.def`：显式导出清单（ABI 契约，也是自行再生成导入库的原料）
-- Linux 构建对应产出 `uniconnect_*.so`（第 2 期开放）
+- Linux/macOS 构建产出 `uniconnect_*.so` / `*.dylib`（libusb 胶水 linux=usbfs+netlink、darwin=darwin_usb；hidapi 胶水 linux=libusb 后端、mac=IOHID；均静态链 vendored 源，无系统 libusb/hidapi 依赖，仅需 gcc/clang + pthread）。CI 三平台矩阵见 `.github/workflows/release.yml`
 - 三个头文件**零外部依赖**（协议常量在打包时从固件头内联，`uniconnect_common.h`/`uniconnect_can.h` 自包含），拷走即用
 
 ## ABI 规约（两库一致）

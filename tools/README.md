@@ -8,6 +8,7 @@
 |---|---|---|
 | `msos_validate.py` | MS OS 2.0 描述符集机械校验：结构平铺、子集长度、集合/BOS 双份总长同步、类型值（规范表 9）。改 `app/Bsp/device/usb/bsp_usb.c` 的 MSOS/BOS 必跑，勿肉眼对字节（曾两次拦下丢字节/漏同步） | `python tools/msos_validate.py` |
 | `stack_watermark.py` | 线程栈高水位检测：openocd 读栈（RT-Thread '#' 预填单调保持，事后扫描等价实时），按 map 解析各栈实占与利用率，默认 60% 报警。改任何线程栈配置后必跑 | `python tools/stack_watermark.py --limit 60`（Release 固件加 `--map build-rel/uniconnect.map`） |
+| `make_allinone.py` | 工厂整片镜像合成：boot@0x0 + APP@0x5000 + 0xFF 旗标页 → 256KB bin + Intel HEX（越界/超长机械校验）。CI 发布流水线与手工出包共用 | `python tools/make_allinone.py build/boot.bin build/uniconnect.bin build/all_in_one.bin build/all_in_one.hex` |
 
 ## 回归套件（固件改动后按此顺序跑）
 

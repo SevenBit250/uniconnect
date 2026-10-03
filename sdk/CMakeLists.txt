@@ -24,7 +24,9 @@ add_subdirectory(${FW_ROOT}/third_party/hidapi  ${CMAKE_BINARY_DIR}/hidapi-build
 
 # 交付头聚合: 5头(源) -> 3头(交付, 自包含, uniconnect_*): 内联固件同源头
 set(UNI_DIST_INCLUDE ${CMAKE_BINARY_DIR}/dist-include)
-execute_process(COMMAND ${CMAKE_COMMAND} -E env python ${CMAKE_CURRENT_SOURCE_DIR}/amalgamate.py
+find_program(UNI_PYTHON NAMES python3 python REQUIRED)   # CI的ubuntu镜像无裸python
+execute_process(COMMAND ${CMAKE_COMMAND} -E env
+                        ${UNI_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/amalgamate.py
                         ${UNI_DIST_INCLUDE} COMMAND_ERROR_IS_FATAL ANY)
 
 function(uni_add_dll name)

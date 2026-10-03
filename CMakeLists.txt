@@ -47,4 +47,8 @@ add_subdirectory(boot)
 include(cmake/flash.cmake)
 
 # 宿主SDK动态库(嵌套构建, ALL=随 cmake --build build 一起出): 见 sdk/host.cmake
-include(sdk/host.cmake)
+# CI固件流水线传 -DUNI_BUILD_SDK=OFF 可只出固件(SDK由独立矩阵作业构建)
+option(UNI_BUILD_SDK "随根构建一并出宿主SDK" ON)
+if(UNI_BUILD_SDK)
+    include(sdk/host.cmake)
+endif()

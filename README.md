@@ -47,6 +47,17 @@ python tools/fw_update.py build/uniconnect.bin --skip-trigger   # 写入首份 G
 
 openocd 直烧后设备停在 boot 态（HID，PID 0x0219）是**预期行为**——无 GOOD 记录不放行是封板级安全设计。升级固件用 `python tools/fw_update.py build/uniconnect.bin`（APP 态触发，全自动两阶段）。
 
+工厂整片镜像（wch-link 一次性烧录 256KB）：`python tools/make_allinone.py build/boot.bin build/uniconnect.bin build/all_in_one.bin build/all_in_one.hex`（boot@0x0 + APP@0x5000 + 0xFF 旗标页）。
+
+### 发布（GitHub CI）
+
+推送 `v*` 标签触发 `.github/workflows/release.yml`：固件在 ubuntu 上用 WCH 官方 GCC 8.2（xw 扩展，工具链二进制来自 [TianpeiLee/wch_gcc_8_linux](https://github.com/TianpeiLee/wch_gcc_8_linux)，openwch 板管理器索引指定分发）交叉编译，SDK 跑 win/linux/macos(x64+arm64) 矩阵，产物自动挂到 GitHub Release：
+
+- `uniconnect-fw-<tag>.zip` —— `boot/`（bin/hex/elf/map）、`app/`（同前）、`all_in_one/`（工厂整片镜像）
+- `uniconnect-sdk-<tag>-{win-x64,linux-x64,macos-x64,macos-arm64}` —— 动态库 + 导入库 + 三头 + example + SDK.md
+
+Actions 页可手动 workflow_dispatch 干跑（同样构建上传 artifact，但不建 Release 不打 tag）。注意 CI 固件为 Release(-Os) 构建。
+
 ## 目录结构
 
 ```

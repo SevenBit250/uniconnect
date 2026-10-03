@@ -1,0 +1,160 @@
+# release.yml -- tag推送触发的发布流水线
+#
+# 触发: git push v* 标签 (也支持 Actions 页手动 workflow_dispatch 干跑, 不建 Release)
+# 产物:
+#   固件包 uniconnect-fw-<tag>.zip       boot/ app/ all_in_one/ (平台无关, ubuntu上交叉编)
+#   SDK包   uniconnect-sdk-<tag>-<os>-<arch>  win/linux/macos (x64+arm64)
+# 发布: tag构建 -> 创建 GitHub Release 并挂全部产物 (softprops/action-gh-release, 开源标准做法)
+#
+# 工具链事实源(为什么不是xpack): 固件用 -march=rv32imacxw (WCH自定义压缩/HPE扩展),
+# 必须用 WCH 官方 GCC 8.2 二进制 -- openwch 板管理器索引指定的分发:
+#   linux: https://codeload.github.com/TianpeiLee/wch_gcc_8_linux/tar.gz/refs/tags/8.2.0
+#   macos: https://codeload.github.com/TianpeiLee/wch_gcc_macos/tar.gz/refs/tags/8.2.0
+# (与本地 MRS 自带 "RISC-V Embedded GCC" 同源, 见 openwch/risc-none-embed-gcc)
+
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write   # 创建Release/上传资产
+
+jobs:
+  # ---------- 固件: boot / app / all_in_one (交叉编译, 平台无关产物) ----------
+  firmware:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装构建工具
+        run: pip install ninja
+
+      - name: 获取 WCH RISC-V GCC 8.2 (xw扩展)
+        run: |
+          curl -sL https://codeload.github.com/TianpeiLee/wch_gcc_8_linux/tar.gz/refs/tags/8.2.0 | tar xz -C /opt
+          TC_BIN=$(dirname "$(find /opt -type f -name 'riscv-none-embed-gcc' | head -1)")
+          echo "TOOLCHAIN_BIN=$TC_BIN" >> "$GITHUB_ENV"
+          echo "$TC_BIN" >> "$GITHUB_PATH"
+          chmod -R +x "$TC_BIN"
+          "$TC_BIN/riscv-none-embed-gcc" --version | head -1
+
+      - name: 构建 (Release)
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DUNI_BUILD_SDK=OFF
+          cmake --build build
+          riscv-none-embed-size build/boot.elf build/uniconnect.elf
+
+      - name: 合成 all_in_one 工厂镜像
+        run: |
+          python3 tools/make_allinone.py build/boot.bin build/uniconnect.bin \
+            build/all_in_one.bin build/all_in_one.hex
+
+      - name: 归集固件包
+        run: |
+          VER=${GITHUB_REF_NAME:-manual}
+          PKG=dist/uniconnect-fw-${VER}
+          mkdir -p "${PKG}"/boot "${PKG}"/app "${PKG}"/all_in_one
+          cp build/boot.bin build/boot.hex build/boot.elf build/boot.map "${PKG}"/boot/
+          cp build/uniconnect.bin build/uniconnect.hex build/uniconnect.elf \
+             build/uniconnect.map "${PKG}"/app/
+          cp build/all_in_one.bin build/all_in_one.hex "${PKG}"/all_in_one/
+          echo "UniConnect 固件 ${VER} (CH32V305CCT6)
+
+          boot/       引导固件, flash@0x0 (20KB分区), 单独补烧/恢复用
+          app/        应用固件, flash@0x5000, 可经USB bootloader升级(升级工具见sdk)
+          all_in_one/ 工厂整片镜像(boot+app+0xFF旗标页), wch-link整片烧录用
+
+          构建类型: Release(-Os)" > "${PKG}"/README.txt
+          cd dist && zip -r "uniconnect-fw-${VER}.zip" "uniconnect-fw-${VER}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: dist/*.zip
+
+  # ---------- SDK: win/linux/macos 矩阵 ----------
+  sdk:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, tag: win-x64,   pack: zip }
+          - { os: ubuntu-latest,  tag: linux-x64, pack: tgz }
+          - { os: macos-13,       tag: macos-x64,   pack: tgz }
+          - { os: macos-14,       tag: macos-arm64, pack: tgz }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装构建工具 (windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+
+      - name: 安装构建工具 (posix)
+        if: runner.os != 'Windows'
+        run: pip install ninja
+
+      - name: 构建 SDK (posix)
+        if: runner.os != 'Windows'
+        run: |
+          cmake -S sdk -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+          ctest --test-dir build --output-on-failure
+
+      - name: 构建 SDK (windows, msys2)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          cmake -S sdk -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc
+          cmake --build build
+          ctest --test-dir build --output-on-failure
+
+      - name: 归集 SDK 包
+        shell: bash
+        run: |
+          VER=${GITHUB_REF_NAME:-manual}
+          PKG=dist/uniconnect-sdk-${VER}-${{ matrix.tag }}
+          mkdir -p "${PKG}"
+          cp -r build/dist/* "${PKG}"/          # dll/so/dylib + .lib/.def + include/
+          cp -r sdk/example "${PKG}"/example
+          cp sdk/README.md "${PKG}"/SDK.md
+          cd dist
+          if [ "${{ matrix.pack }}" = zip ]; then
+            7z a "$(basename "$PKG").zip" "$(basename "$PKG")"
+          else
+            tar czf "$(basename "$PKG").tar.gz" "$(basename "$PKG")"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdk-${{ matrix.tag }}
+          path: dist/*
+
+  # ---------- 发布 (仅tag) ----------
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [firmware, sdk]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist-artifacts
+          merge-multiple: true
+
+      - name: 创建 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist-artifacts/*.zip
+            dist-artifacts/*.tar.gz
