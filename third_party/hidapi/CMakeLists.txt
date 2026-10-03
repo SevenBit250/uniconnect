@@ -35,3 +35,5 @@ else()
 endif()
 
 target_compile_options(uni_hidapi PRIVATE -w)
+# 静态链入共享库(.so/.dylib)必须PIC, 与uni_libusb同策
+set_target_properties(uni_hidapi PROPERTIES POSITION_INDEPENDENT_CODE ON)

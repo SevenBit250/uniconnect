@@ -43,6 +43,14 @@ function(uni_add_dll name)
     set_target_properties(${name} PROPERTIES PREFIX "")   # uniconnect_can.dll 而非 libuniconnect_can.dll
     target_compile_options(${name} PRIVATE -Wall -Wextra)
 
+    # 导入库仅Windows存在(ELF/Mach-O无此概念, IMPORT_LIBRARY_SUFFIX为空)
+    set(_implib_copy)
+    if(CMAKE_IMPORT_LIBRARY_SUFFIX)
+        set(_implib_copy
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    ${CMAKE_BINARY_DIR}/lib${name}${CMAKE_IMPORT_LIBRARY_SUFFIX} ${SDK_DIST_DIR}/)
+    endif()
+
     # 交付物归集: dll + 导入库(.dll.a) + .def + 头文件 -> SDK_DIST_DIR
     add_custom_command(TARGET ${name} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory ${SDK_DIST_DIR}/include
@@ -50,8 +58,7 @@ function(uni_add_dll name)
         COMMAND ${CMAKE_COMMAND} -E rm -f ${SDK_DIST_DIR}/include/usb_ids.h
                 ${SDK_DIST_DIR}/include/can_proto.h
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:${name}> ${SDK_DIST_DIR}/
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                ${CMAKE_BINARY_DIR}/lib${name}${CMAKE_IMPORT_LIBRARY_SUFFIX} ${SDK_DIST_DIR}/
+        ${_implib_copy}
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 ${CMAKE_CURRENT_SOURCE_DIR}/src/${name}.def ${SDK_DIST_DIR}/
         COMMAND ${CMAKE_COMMAND} -E copy_if_different

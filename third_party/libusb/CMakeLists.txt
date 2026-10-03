@@ -50,5 +50,7 @@ target_include_directories(uni_libusb PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/uni_config   # <config.h> (libusbi.h 无条件包含)
     ${CMAKE_CURRENT_SOURCE_DIR}/libusb       # <libusb.h>
 )
+# 静态链入共享库(Linux/macOS的.so/.dylib)必须PIC(TLS重定位R_X86_64_TPOFF32实锚)
+set_target_properties(uni_libusb PROPERTIES POSITION_INDEPENDENT_CODE ON)
 # vendored上游源码的告警不属于本仓治理范围
 target_compile_options(uni_libusb PRIVATE -w)
