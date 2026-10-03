@@ -1,4 +1,4 @@
-/* test_abi.c -- SDK 冒烟测试: 两库加载/ABI版本/生命周期往返 */
+/* test_abi.c -- SDK 冒烟测试(设备无关, 进CTest): 两库加载/ABI版本/生命周期往返 */
 #include <stdio.h>
 #include "uniconnect_upgrade.h"
 #include "uniconnect_can.h"
@@ -14,9 +14,15 @@ int main(void)
     if (fwu_open(&f) != UNI_OK || !f) { puts("fwu_open FAIL"); rc = 1; }
     else fwu_close(f);
 
+    /* can_open含真USB枚举: 无设备时NOT_FOUND是正确行为(CI环境), 有设备时开成功即关 */
     can_ctx *c = NULL;
-    if (can_open(&c) != UNI_OK || !c) { puts("can_open FAIL"); rc = 1; }
-    else can_close(c);
+    int r = can_open(&c);
+    if (r == UNI_OK) {
+        can_close(c);
+    } else if (r != UNI_ERR_NOT_FOUND) {
+        printf("can_open unexpected rc=%d(%s) FAIL\n", r, can_strerror(r));
+        rc = 1;
+    }
 
     puts(rc == 0 ? "test_abi PASS" : "test_abi FAIL");
     return rc;

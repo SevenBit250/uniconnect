@@ -30,6 +30,7 @@
 #define ENABLE_LOGGING 1
 #define HAVE_SYS_TIME_H 1
 #define HAVE_NFDS_T 1
+#define HAVE_CLOCK_GETTIME 1   /* usbi_get_*_time走libusbi.h内联(否则threads_posix.c分支缺席致链接缺符号) */
 #define HAVE_CLOCK_MONOTONIC 1
 #define HAVE_CLOCK_REALTIME 1
 #define PLATFORM_POSIX 1

@@ -99,6 +99,7 @@ jobs:
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-ninja
+            python
 
       - name: 安装构建工具 (posix)
         if: runner.os != 'Windows'
