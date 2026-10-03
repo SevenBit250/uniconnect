@@ -51,26 +51,33 @@ function(uni_add_dll name)
                     ${CMAKE_BINARY_DIR}/lib${name}${CMAKE_IMPORT_LIBRARY_SUFFIX} ${SDK_DIST_DIR}/)
     endif()
 
-    # 交付物归集: dll + 导入库(.dll.a) + .def + 头文件 -> SDK_DIST_DIR
+    # 交付物归集: dll + 导入库(.dll.a) + .def(每目标各自产物, 无共享文件)
     add_custom_command(TARGET ${name} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory ${SDK_DIST_DIR}/include
-        # 聚合交付=仅三头: 清掉历史布局残留
-        COMMAND ${CMAKE_COMMAND} -E rm -f ${SDK_DIST_DIR}/include/usb_ids.h
-                ${SDK_DIST_DIR}/include/can_proto.h
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:${name}> ${SDK_DIST_DIR}/
         ${_implib_copy}
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 ${CMAKE_CURRENT_SOURCE_DIR}/src/${name}.def ${SDK_DIST_DIR}/
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                ${UNI_DIST_INCLUDE}/uniconnect_common.h
-                ${UNI_DIST_INCLUDE}/uniconnect_upgrade.h
-                ${UNI_DIST_INCLUDE}/uniconnect_can.h
-                ${SDK_DIST_DIR}/include/
         COMMENT "== Collecting ${name} -> ${SDK_DIST_DIR} ==" VERBATIM)
 endfunction()
 
 uni_add_dll(uniconnect_upgrade src/uniconnect_upgrade.c src/uni_transport.c)
 uni_add_dll(uniconnect_can    src/uniconnect_can.c    src/uni_transport.c)
+
+# 交付头归集为单写者目标: 两DLL的POST_BUILD并行拷同一批头会互相踩踏
+# (linux CI实锚: 两copy_if_different同毫秒并发, 后者报Error copying)
+add_custom_target(sdk_dist_headers
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${SDK_DIST_DIR}/include
+    # 聚合交付=仅三头: 清掉历史布局残留
+    COMMAND ${CMAKE_COMMAND} -E rm -f ${SDK_DIST_DIR}/include/usb_ids.h
+            ${SDK_DIST_DIR}/include/can_proto.h
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${UNI_DIST_INCLUDE}/uniconnect_common.h
+            ${UNI_DIST_INCLUDE}/uniconnect_upgrade.h
+            ${UNI_DIST_INCLUDE}/uniconnect_can.h
+            ${SDK_DIST_DIR}/include/
+    COMMENT "== Collecting dist headers -> ${SDK_DIST_DIR}/include ==" VERBATIM)
+add_dependencies(uniconnect_upgrade sdk_dist_headers)
+add_dependencies(uniconnect_can sdk_dist_headers)
 
 # MSVC 兼容导入库(.lib): MinGW binutils dlltool 从 .def 生成 COFF 格式,
 # MSVC 链接器可直接消费(工具缺失则跳过, .def 兜底由消费端自行生成)
