@@ -97,6 +97,19 @@ int main(void)
 - **C#**：P/Invoke 声明 `[DllImport("uniconnect_can")]`，链 `uniconnect_can.lib` 或运行时 `LoadLibrary`
 - **Python**：`ctypes.CDLL("uniconnect_can.dll")` 按头文件签名映射；结构与 `can_frame` 布局一致（`struct.pack`/`Structure`）
 
+## 图形界面示例（example/）
+
+两个开箱即用的 tkinter GUI（Python 3 标准库，仅 ctypes 依赖，无需 pip 安装）：
+
+```bash
+python sdk/example/upgrade_gui.py    # 固件升级：选文件、显示镜像信息(大小/CRC32/预览)、进度条、日志
+python sdk/example/can_gui.py        # CAN 工具：双通道面板，覆盖 can_comm.h 全部操作
+```
+
+- DLL 自动发现顺序：环境变量 `UNICONNECT_SDK_DIR` → `build/sdk/`（monorepo 构建产物）→ 脚本目录
+- 升级示例：`fwu_device_state` 设备探测、`fwu_upgrade_file` 后台线程升级，进度回调经队列投递到 UI 线程（tk 的 after 轮询），窗口不卡死
+- CAN 示例：每通道独立面板（`set_bitrate` / `set_mode`（正常/静默回环/睡眠）/ `send` / `get_status` / `flush_rx`），接收用 `can_recv` 轮询线程持续收取，两通道操作互不干扰——也是"句柄非线程安全，一通道一线程"ABI 约定的示范用法
+
 ## 链接方式速查
 
 | 你的工具链 | 链接物 |
@@ -117,6 +130,7 @@ cmake --build build/sdk-host --target test    # CTest: ABI往返 + 交付头自�
 include/   三个交付头(源头; 打包时经 amalgamate.py 聚合+内联固件协议头)
 src/       实现 + uni_transport(平台收敛层) + .def 导出契约
 tests/     ABI 冒烟 + 交付头自包含测试
+example/   Python tkinter GUI 示例(升级 + CAN 工具)
 amalgamate.py   交付头聚合器(5头→3头)
 host.cmake 挂进固件根构建的嵌套构建定义
 ```
