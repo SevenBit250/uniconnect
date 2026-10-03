@@ -81,10 +81,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: windows-latest, tag: win-x64,   pack: zip }
-          - { os: ubuntu-latest,  tag: linux-x64, pack: tgz }
-          - { os: macos-13,       tag: macos-x64,   pack: tgz }
-          - { os: macos-14,       tag: macos-arm64, pack: tgz }
+          - { os: windows-latest, tag: win-x64,     pack: zip }
+          - { os: ubuntu-latest,  tag: linux-x64,   pack: tgz }
+          - { os: macos-14,       tag: macos-arm64, pack: tgz }   # 仅M系列: macos-13(Intel池)退役期排队不可接受
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
