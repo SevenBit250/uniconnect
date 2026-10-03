@@ -28,6 +28,7 @@ config.h*
 !msvc/config.h
 !android/config.h
 !Xcode/config.h
+!uni_config/config.h
 .vs
 config.log
 config.status
