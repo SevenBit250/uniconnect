@@ -5,6 +5,9 @@
 cmake_minimum_required(VERSION 3.20)
 
 if(WIN32)
+    # 注: 不编译 windows_hotplug.c(热插拔通知线程)——SDK只用按需scan, 无热插拔需求;
+    # 且其后台线程存在进程退出期加载器锁死锁隐患(2026-10-03 test_abi间歇挂死实锚),
+    # 上游全部引用经 LIBUSB_WINDOWS_HOTPLUG 宏门控, 摘除后走无热插拔回退路径。
     add_library(uni_libusb STATIC
         libusb/core.c
         libusb/descriptor.c
@@ -15,13 +18,11 @@ if(WIN32)
         libusb/os/events_windows.c
         libusb/os/threads_windows.c
         libusb/os/windows_common.c
-        libusb/os/windows_hotplug.c
         libusb/os/windows_usbdk.c
         libusb/os/windows_winusb.c
     )
-    # windows后端: WinUsb(收发) + SetupAPI(枚举) + CfgMgr32(热插拔通知)
-    target_compile_definitions(uni_libusb PRIVATE LIBUSB_WINDOWS_HOTPLUG)  # windows_hotplug.c全量编译
-    target_link_libraries(uni_libusb INTERFACE winusb setupapi cfgmgr32)
+    # windows后端: WinUsb(收发) + SetupAPI(枚举)
+    target_link_libraries(uni_libusb INTERFACE winusb setupapi)
 else()
     message(FATAL_ERROR "libusb胶水当前只接线了Windows后端; Linux(os/linux_usbfs.c+events_posix/threads_posix+config探测)按README规划在Linux目标开放时补充")
 endif()

@@ -17,8 +17,10 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 # 固件协议头单一事实源(host-safe 契约, 构建即检测)
 set(FW_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
-# 传输后端: vendored libusb v1.0.30 静态链入(交付面零新增dll), LGPL随仓库vendored
+# 传输后端: vendored libusb v1.0.30(WinUSB bulk) + hidapi 0.15.0(boot HID),
+# 均静态链入(交付面零新增dll); 许可证LGPL/BSD随仓库vendored满足源码可得性
 add_subdirectory(${FW_ROOT}/third_party/libusb ${CMAKE_BINARY_DIR}/libusb-build)
+add_subdirectory(${FW_ROOT}/third_party/hidapi  ${CMAKE_BINARY_DIR}/hidapi-build)
 
 # 交付头聚合: 5头(源) -> 3头(交付, 自包含, uniconnect_*): 内联固件同源头
 set(UNI_DIST_INCLUDE ${CMAKE_BINARY_DIR}/dist-include)
@@ -34,7 +36,8 @@ function(uni_add_dll name)
         ${FW_ROOT}/boot/User       # boot.h(HID升级协议)
     )
     target_compile_definitions(${name} PRIVATE UNI_SDK_BUILD)
-    target_link_libraries(${name} PRIVATE uni_libusb)   # libusb静态链+winusb/setupapi/cfgmgr32
+    # 传输后端静态链入: libusb(WinUSB bulk) + hidapi(boot HID, uni_transport共享源引用)
+    target_link_libraries(${name} PRIVATE uni_libusb uni_hidapi)
     set_target_properties(${name} PROPERTIES PREFIX "")   # uniconnect_can.dll 而非 libuniconnect_can.dll
     target_compile_options(${name} PRIVATE -Wall -Wextra)
 

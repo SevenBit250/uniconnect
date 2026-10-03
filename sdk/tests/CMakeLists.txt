@@ -20,6 +20,14 @@ target_include_directories(can_hw_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../common)
 target_link_libraries(can_hw_test PRIVATE uniconnect_can)
 
+# 真机升级测试(需设备在线APP态, 手工跑): 完整升级+50%中断注入+恢复+升级后CAN可用
+#   build/sdk-host/tests/fwu_hw_test.exe <镜像.bin>   (通常 build/uniconnect.bin)
+add_executable(fwu_hw_test fwu_hw_test.c)
+target_include_directories(fwu_hw_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../common)
+target_link_libraries(fwu_hw_test PRIVATE uniconnect_upgrade uniconnect_can)
+
 # Windows按PATH搜dll: 注入构建目录
 set_tests_properties(abi dist_headers PROPERTIES
     ENVIRONMENT "PATH=${CMAKE_BINARY_DIR};$ENV{PATH}")

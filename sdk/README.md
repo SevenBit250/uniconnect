@@ -2,7 +2,7 @@
 
 UniConnect 探针的宿主动态库：**uniconnect_upgrade**（固件升级）与 **uniconnect_can**（CAN 通讯），C ABI，跨语言可调（C/C++/C#/Python/LabVIEW…）。
 
-> **实现状态（2026-10-03 第 2 期）**：**uniconnect_can 数据面已真实现并真机验证**——libusb v1.0.30 vendored 静态链入（交付面零新增 DLL），双通道静默回环 + 真总线交叉 200 帧/向逐帧校验 + 设备计数对账全 PASS（`tests/can_hw_test.c`，与 `tools/can_usb_test.py` 差分双绿）。uniconnect_upgrade 的 USB 传输（触发/烧写）返回 `UNI_ERR_NOT_SUP`，第 3 期接 hidapi 后点亮（接口不变）；boot HID 通路同批。
+> **实现状态（2026-10-03 第 3 期·全部完成）**：两库数据面**全真实现并真机验证**。传输后端 libusb v1.0.30（WinUSB bulk）+ hidapi 0.15.0（boot HID）均 vendored 静态链入，**交付面零新增 DLL**。真机回归：CAN 双通道回环 + 真总线交叉逐帧校验全 PASS（`can_hw_test`）；升级完整链 + **50% 中断注入（设备留 boot）+ 免触发恢复重做**全 PASS（`fwu_hw_test`），与 `tools/can_usb_test.py`/`fw_update.py` 差分双绿。
 
 ## 获取与构建
 
@@ -66,6 +66,8 @@ int main(void)
 
 进阶：`fwu_trigger_bootloader` / `fwu_wait_bootloader` / `fwu_flash`（带进度回调）/ `fwu_reboot` 手动分步，可自定义进度 UI 与中断恢复。
 
+**中断恢复语义**：升级任何时刻被打断（回调返回非 0 = `UNI_ERR_ABORTED`、拔线、进程退出），设备留在 boot 形态（bootloader P0：无 GOOD 记录永不跳转）。重新调用 `fwu_upgrade_file` 即完整重做——它检测到设备已在 boot 会自动跳过触发阶段。`fwu_progress_cb` 返回非 0 触发干净中止，错误码 `UNI_ERR_ABORTED`(-11)。
+
 ### CAN 通讯（C）
 
 ```c
@@ -125,6 +127,9 @@ cmake --build build/sdk-host --target test   # CTest: ABI往返 + 交付头自�
 
 # 真机CAN回归(需设备在线, 与tools/can_usb_test.py差分): 静默回环+真总线交叉+计数对账
 cd build/sdk-host && PATH="$PWD:$PATH" ./tests/can_hw_test.exe 200
+
+# 真机升级回归(需设备在线APP态, 与tools/fw_update.py差分): 完整升级+50%中断注入+恢复
+cd build/sdk-host && PATH="$PWD:$PATH" ./tests/fwu_hw_test.exe ../uniconnect.bin
 ```
 
 ## 目录

@@ -45,6 +45,7 @@ extern "C" {
 #define UNI_ERR_PROTO        (-8)   /* 设备协议应答错误 */
 #define UNI_ERR_STATE        (-9)   /* 调用时序/状态错误 */
 #define UNI_ERR_CRC          (-10)  /* 校验失败 */
+#define UNI_ERR_ABORTED      (-11)  /* 被进度回调主动中止(升级; 设备留在boot可重试) */
 
 /* USB 标识(VID/PID/接口/端点/Vendor0触发命令): 直引固件单一事实源头 */
 #include "usb_ids.h"
